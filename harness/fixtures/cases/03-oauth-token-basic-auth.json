@@ -1,0 +1,23 @@
+{
+  "case": "oauth-token-basic-auth",
+  "description": "POST /oauth/token with HTTP Basic credentials",
+  "request": {
+    "method": "POST",
+    "path": "/oauth/token",
+    "headers": {
+      "authorization": "Basic ZGVtby1wb3J0YWw6ZGVtby1wb3J0YWwtc2VjcmV0"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "access_token": "__MASKED__",
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "scope": "read write"
+    }
+  },
+  "mask": [
+    "$.access_token"
+  ]
+}

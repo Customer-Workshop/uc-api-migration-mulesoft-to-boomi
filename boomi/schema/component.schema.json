@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "boomi-local-component.schema.json",
+  "title": "Local Boomi process component (offline subset of the AtomSphere Component model)",
+  "description": "Schema for the JSON form of a Boomi process component as validated by the component gate. Components are authored as XML (bns:Component) under boomi/components/ and parsed to this shape. Every enum below is a CLOSED SET — an unknown shapetype, connector, or source kind is a validation failure, never a silent no-op.",
+  "type": "object",
+  "required": ["name", "type", "shapes"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "type": { "const": "process" },
+    "route": {
+      "type": "object",
+      "description": "Present on top-level processes (Web Services Server operation). Absent on subprocesses.",
+      "required": ["method", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "enum": ["GET", "POST", "PUT", "DELETE"] },
+        "path": { "type": "string", "pattern": "^/" }
+      }
+    },
+    "shapes": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/shape" }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["pathParam", "queryParam", "header", "body", "payload", "property", "literal", "rowcount", "function"] },
+        "name": { "type": "string" },
+        "path": { "type": "string", "description": "JSON path within body/payload, e.g. $.startDate or $[0].pto_balance" },
+        "value": {},
+        "function": { "enum": ["uuid", "now_iso", "now_plus_seconds"] },
+        "args": { "type": "array" }
+      }
+    },
+    "shape": {
+      "type": "object",
+      "required": ["name", "shapetype"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "shapetype": {
+          "enum": ["start", "connectoraction", "decision", "map", "message", "properties", "processcall", "returndocuments"]
+        },
+        "next": { "type": "string", "description": "name of the next shape (absent on returndocuments and on decision, which uses whenTrue/whenFalse)" },
+        "whenTrue": { "type": "string" },
+        "whenFalse": { "type": "string" },
+        "condition": {
+          "type": "object",
+          "required": ["left", "operator"],
+          "additionalProperties": false,
+          "properties": {
+            "left": { "$ref": "#/$defs/source" },
+            "operator": { "enum": ["equals", "notequals", "empty", "notempty", "exists", "notexists"] },
+            "right": { "$ref": "#/$defs/source" }
+          }
+        },
+        "connector": { "enum": ["database"] },
+        "operation": { "enum": ["select", "execute"] },
+        "sql": { "type": "string" },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/source" },
+          "description": "named SQL parameters (:name) bound from sources"
+        },
+        "mappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["to", "from"],
+            "additionalProperties": false,
+            "properties": {
+              "to": { "type": "string", "description": "output field name, or '$' for the whole document" },
+              "from": { "$ref": "#/$defs/source" },
+              "foreach": {
+                "type": "object",
+                "description": "map a result-set into an array; 'field' picks one column into a bare value, 'fields' picks named columns into objects",
+                "additionalProperties": false,
+                "properties": {
+                  "field": { "type": "string" },
+                  "fields": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "template": { "description": "message shape: JSON template; {{pathParam:x}} / {{property:x}} placeholders are substituted" },
+        "status": { "type": "integer", "minimum": 200, "maximum": 599 },
+        "properties": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/source" }
+        },
+        "process": { "type": "string", "description": "processcall: name of the subprocess component" }
+      }
+    }
+  }
+}

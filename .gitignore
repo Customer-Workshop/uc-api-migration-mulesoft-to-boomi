@@ -1,0 +1,5 @@
+inventory/report/
+harness/reports/
+.venv/
+__pycache__/
+.pytest_cache/

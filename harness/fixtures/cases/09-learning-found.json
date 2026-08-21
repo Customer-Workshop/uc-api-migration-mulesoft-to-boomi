@@ -1,0 +1,28 @@
+{
+  "case": "learning-found",
+  "description": "GET learning-status for 101 \u2014 wrapped object, rows in seed order, employeeId is a STRING",
+  "request": {
+    "method": "GET",
+    "path": "/api/employee/101/learning-status",
+    "headers": {
+      "authorization": "Bearer seeded-valid-token-0001"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "employeeId": "101",
+      "learningStatus": [
+        {
+          "course": "Integration Architecture Fundamentals",
+          "status": "completed"
+        },
+        {
+          "course": "Advanced Data Mapping",
+          "status": "in_progress"
+        }
+      ],
+      "status": "success"
+    }
+  }
+}

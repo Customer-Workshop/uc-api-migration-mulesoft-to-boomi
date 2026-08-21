@@ -1,0 +1,19 @@
+{
+  "case": "goals-found",
+  "description": "GET goals for employee 101 \u2014 bare ordered JSON array of goal strings",
+  "request": {
+    "method": "GET",
+    "path": "/api/employee/101/goals",
+    "headers": {
+      "authorization": "Bearer seeded-valid-token-0001"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": [
+      "Ship the Q3 integration platform migration",
+      "Mentor two junior engineers through certification",
+      "Reduce integration incident count by 25%"
+    ]
+  }
+}

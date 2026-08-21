@@ -1,0 +1,19 @@
+{
+  "case": "pto-balance-found",
+  "description": "GET pto/balance for 101 \u2014 ptoBalance is a NUMBER (12.5), not a string",
+  "request": {
+    "method": "GET",
+    "path": "/api/employee/101/pto/balance",
+    "headers": {
+      "authorization": "Bearer seeded-valid-token-0001"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "employeeId": "101",
+      "ptoBalance": 12.5,
+      "status": "success"
+    }
+  }
+}

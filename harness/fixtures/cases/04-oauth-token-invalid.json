@@ -1,0 +1,22 @@
+{
+  "case": "oauth-token-invalid",
+  "description": "POST /oauth/token with wrong secret",
+  "request": {
+    "method": "POST",
+    "path": "/oauth/token",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "client_id": "demo-portal",
+      "client_secret": "wrong"
+    }
+  },
+  "expected": {
+    "status": 401,
+    "body": {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+[project]
+name = "uc-api-migration-mulesoft-to-boomi"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "psycopg[binary]",
+  "jsonschema",
+  "fastapi",
+  "uvicorn",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["harness"]
+testpaths = ["harness/tests"]

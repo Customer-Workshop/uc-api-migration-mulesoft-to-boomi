@@ -1,0 +1,17 @@
+{
+  "case": "goals-none",
+  "description": "SOURCE QUIRK: employee with no goals returns HTTP 200 (not 404) with a message body",
+  "request": {
+    "method": "GET",
+    "path": "/api/employee/74/goals",
+    "headers": {
+      "authorization": "Bearer seeded-valid-token-0001"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "message": "No goals found for employee 74"
+    }
+  }
+}

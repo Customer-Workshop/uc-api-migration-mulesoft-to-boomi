@@ -1,0 +1,1457 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+						http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+						http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+						http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+						http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+						http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+	<!-- HTTP Listener Configuration -->
+	<http:listener-config
+		name="employee-services-api-httpListenerConfig">
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+
+	<!-- Database Configuration -->
+	<db:config name="PostgreSQL_Configuration" doc:name="Database Config">
+		<db:generic-connection
+			driverClassName="org.postgresql.Driver"
+			url="jdbc:postgresql://${db.host}:${db.port}/${db.database}"
+			user="${db.username}"
+			password="${db.password}" />
+	</db:config>
+
+
+
+	<!-- OAuth Token Endpoint Flow -->
+	<flow name="oauth-token-flow">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/oauth/token"
+			allowedMethods="POST" />
+		<logger level="INFO" message="OAuth token request received"
+			doc:name="Log token request" />
+		<logger level="INFO" message="Raw OAuth request payload: #[payload]" doc:name="Log raw payload" />
+		<logger level="INFO" message="OAuth request headers: #[attributes.headers]" doc:name="Log headers" />
+		<try doc:name="Try">
+			<!-- Extract client credentials from Authorization header or request body -->
+			<choice doc:name="Check Authorization Method">
+				<when expression="#[attributes.headers.'authorization' != null]">
+					<!-- Basic Authentication (Authorization header) -->
+					<ee:transform doc:name="Extract Basic Auth">
+						<ee:variables>
+							<ee:set-variable
+								variableName="authHeader"><![CDATA[#[attributes.headers.'authorization']]]></ee:set-variable>
+							<ee:set-variable
+								variableName="encodedCredentials"><![CDATA[#[vars.authHeader[6 to -1]]]]></ee:set-variable>
+							<ee:set-variable
+								variableName="decodedCredentials"><![CDATA[#[java!java::util::Base64::getDecoder() decode(vars.encodedCredentials) as String {encoding: "UTF-8"}]]]></ee:set-variable>
+							<ee:set-variable
+								variableName="clientId"><![CDATA[#[vars.decodedCredentials splitBy(":")[0]]]]></ee:set-variable>
+							<ee:set-variable
+								variableName="clientSecret"><![CDATA[#[vars.decodedCredentials splitBy(":")[1]]]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+				</when>
+				<otherwise>
+					<!-- Request Body Credentials -->
+					<ee:transform doc:name="Extract Body Credentials">
+						<ee:variables>
+							<ee:set-variable
+								variableName="clientId"><![CDATA[#[payload.client_id]]]></ee:set-variable>
+							<ee:set-variable
+								variableName="clientSecret"><![CDATA[#[payload.client_secret]]]></ee:set-variable>
+							<ee:set-variable
+								variableName="grantType"><![CDATA[#[payload.grant_type default "client_credentials"]]]></ee:set-variable>
+							<ee:set-variable
+								variableName="callbackUrl"><![CDATA[#[payload.callback_url default null]]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+					<logger level="INFO" message="OAuth - Extracted variables: clientId=#[vars.clientId], callbackUrl=#[vars.callbackUrl]" doc:name="Log extracted vars" />
+				</otherwise>
+			</choice>
+
+			<logger level="INFO"
+				message="Validating client credentials for client: #[vars.clientId]"
+				doc:name="Log validation" />
+
+			<!-- Validate Client Credentials Against Database -->
+			<db:select doc:name="Validate Client Credentials"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql><![CDATA[
+SELECT client_id, client_secret, user_id FROM api_clients
+WHERE client_id = :clientId AND client_secret = :clientSecret
+]]></db:sql>
+				<db:input-parameters><![CDATA[#[{clientId: vars.clientId, clientSecret: vars.clientSecret}]]]></db:input-parameters>
+			</db:select>
+
+			<logger level="DEBUG" message="Database validation result: #[payload]"
+				doc:name="Log DB result" />
+
+			<choice doc:name="Validate Credentials">
+				<when expression="#[payload != null and sizeOf(payload) > 0]">
+					<!-- Valid Credentials - Generate Token -->
+					<logger level="INFO"
+						message="Valid credentials found for client: #[vars.clientId]"
+						doc:name="Log valid client" />
+					<ee:transform doc:name="Extract Client User ID">
+						<ee:variables>
+							<ee:set-variable variableName="clientUserId"><![CDATA[#[payload[0].user_id]]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+					<ee:transform doc:name="Generate Access Token">
+						<ee:variables>
+							<ee:set-variable variableName="accessToken"><![CDATA[#[uuid() ++ "-" ++ now() as String]]]></ee:set-variable>
+							<ee:set-variable variableName="expiresIn">3600</ee:set-variable>
+							<ee:set-variable variableName="tokenType">"Bearer"</ee:set-variable>
+							<ee:set-variable variableName="expirationTime"><![CDATA[#[(now() + |PT1H|) as String {format: "yyyy-MM-dd HH:mm:ss"}]]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+
+					<!-- Store Token in Database -->
+					<logger level="INFO" message="About to store in DB - clientId: #[vars.clientId], callbackUrl: #[vars.callbackUrl], accessToken: #[vars.accessToken]" doc:name="Log DB insert params" />
+					<db:insert doc:name="Store Token in DB" config-ref="PostgreSQL_Configuration">
+						<db:sql><![CDATA[
+INSERT INTO api_clients (client_id, client_secret, access_token, expires_at, callback_url)
+VALUES (:clientId, :clientSecret, :accessToken, :expiresAt, :callbackUrl)
+ON CONFLICT (client_id) DO UPDATE SET
+  access_token = :accessToken,
+  expires_at = :expiresAt,
+  callback_url = :callbackUrl
+						]]></db:sql>
+						<db:input-parameters><![CDATA[#[{
+  clientId: vars.clientId,
+  clientSecret: vars.clientSecret,
+  accessToken: vars.accessToken,
+  expiresAt: vars.expirationTime,
+  callbackUrl: vars.callbackUrl
+}]]]></db:input-parameters>
+					</db:insert>
+					<logger level="INFO" message="DB insert completed successfully" doc:name="Log DB success" />
+
+					<logger level="INFO"
+						message="Token generated successfully for client: #[vars.clientId]"
+						doc:name="Log success" />
+
+					<!-- Make callback if URL provided -->
+					<logger level="INFO" message="Checking callback URL: #[vars.callbackUrl]" doc:name="Log callback check" />
+					<choice doc:name="Check for callback">
+						<when expression="#[vars.callbackUrl != null and vars.callbackUrl != '']">
+							<logger level="INFO" message="Making callback to: #[vars.callbackUrl] with token: #[vars.accessToken]" doc:name="Log callback start" />
+							<async doc:name="Async callback">
+								<try doc:name="Try callback">
+									<ee:transform doc:name="Prepare callback payload">
+										<ee:message>
+											<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"token": vars.accessToken,
+	"userId": vars.clientId
+}]]></ee:set-payload>
+										</ee:message>
+									</ee:transform>
+									<logger level="INFO" message="Callback payload: #[payload]" doc:name="Log callback payload" />
+									<http:request method="POST" doc:name="Salesforce callback" url="#[vars.callbackUrl]">
+										<http:headers><![CDATA[#[{
+											"Content-Type": "application/json"
+										}]]]></http:headers>
+									</http:request>
+									<logger level="INFO" message="Callback successful, response: #[payload]" doc:name="Log callback success" />
+									<error-handler>
+										<on-error-continue type="ANY" doc:name="Ignore callback errors">
+											<logger level="ERROR" message="Callback failed to #[vars.callbackUrl]: #[error.description]" doc:name="Log callback error" />
+										</on-error-continue>
+									</error-handler>
+								</try>
+							</async>
+						</when>
+						<otherwise>
+							<logger level="INFO" message="No callback URL provided" doc:name="Log no callback" />
+						</otherwise>
+					</choice>
+
+					<!-- Return Token Response -->
+					<ee:transform doc:name="Token Response">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  access_token: vars.accessToken,
+  token_type: vars.tokenType,
+  expires_in: vars.expiresIn,
+  scope: "read write"
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+				</when>
+				<otherwise>
+					<!-- Invalid Credentials -->
+					<logger level="WARN" message="Invalid client credentials: #[vars.clientId]"
+						doc:name="Log invalid credentials" />
+					<set-payload
+						value='{"error": "invalid_client", "error_description": "Client authentication failed"}'
+						doc:name="Set error payload" />
+					<set-variable variableName="httpStatus" value="401" doc:name="Set 401 status" />
+				</otherwise>
+			</choice>
+
+			<error-handler>
+				<on-error-propagate type="DB:CONNECTIVITY" doc:name="Database Connectivity Error">
+					<logger level="ERROR"
+						message="Database connectivity error during OAuth validation: #[error.description]"
+						doc:name="Log DB connectivity error" />
+					<set-payload
+						value='{"error": "server_error", "error_description": "Database connection failed during authentication"}'
+						doc:name="Set DB connectivity error payload" />
+					<set-variable variableName="httpStatus" value="503" doc:name="Set 503 status" />
+				</on-error-propagate>
+				<on-error-propagate type="DB:*" doc:name="Database Error">
+					<logger level="ERROR"
+						message="Database error during OAuth validation: #[error.description]"
+						doc:name="Log DB error" />
+					<set-payload
+						value='{"error": "server_error", "error_description": "Database error during authentication"}'
+						doc:name="Set DB error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+				<on-error-propagate type="ANY" doc:name="OAuth Error Handler">
+					<logger level="ERROR" message="OAuth token error: #[error.description]"
+						doc:name="Log OAuth error" />
+					<set-payload
+						value='{"error": "server_error", "error_description": "An error occurred while processing the token request"}'
+						doc:name="Set server error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- Token Validation Sub-flow -->
+	<sub-flow name="validate-token-subflow">
+		<logger level="DEBUG" message="Validating bearer token"
+			doc:name="Log token validation" />
+		<choice doc:name="Check Authorization Header">
+			<when
+				expression="#[attributes != null and attributes.headers != null and attributes.headers.'authorization' != null and (attributes.headers.'authorization' startsWith 'Bearer ')]">
+				<ee:transform doc:name="Extract Token">
+					<ee:variables>
+						<ee:set-variable
+							variableName="bearerToken"><![CDATA[#[attributes.headers.'authorization'[7 to -1]]]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+
+				<!-- Validate Token Against Database -->
+				<try doc:name="Try Token Validation">
+					<db:select doc:name="Retrieve Token from DB" config-ref="PostgreSQL_Configuration">
+						<db:sql><![CDATA[
+SELECT access_token, expires_at, client_id FROM api_clients
+WHERE access_token = :token AND expires_at > :currentTime
+						]]></db:sql>
+						<db:input-parameters><![CDATA[#[{token: vars.bearerToken, currentTime: now() as String {format: "yyyy-MM-dd HH:mm:ss"}}]]]></db:input-parameters>
+					</db:select>
+					
+					<choice doc:name="Check if Token Found">
+						<when expression="#[payload == null or sizeOf(payload) == 0]">
+							<set-payload value='{"error": "invalid_token", "error_description": "Invalid or expired access token"}' doc:name="Set invalid token error" />
+							<set-variable variableName="httpStatus" value="401" doc:name="Set 401 status" />
+						</when>
+						<otherwise>
+							<logger level="DEBUG" message="Token validation successful"
+								doc:name="Log validation success" />
+						</otherwise>
+					</choice>
+					<error-handler>
+						<on-error-propagate type="DB:*" doc:name="Database Error">
+							<set-payload value='{"error": "invalid_token", "error_description": "Token validation failed"}' doc:name="Set token validation error" />
+							<set-variable variableName="httpStatus" value="401" doc:name="Set 401 status" />
+						</on-error-propagate>
+					</error-handler>
+				</try>
+			</when>
+			<otherwise>
+				<logger level="WARN" message="Missing or invalid Authorization header"
+					doc:name="Log missing auth" />
+				<set-payload value='{"error": "missing_token", "error_description": "Authorization header is missing or invalid"}' doc:name="Set missing token error" />
+				<set-variable variableName="httpStatus" value="401" doc:name="Set 401 status" />
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<!-- APIKit Configuration -->
+	<apikit:config name="employee-services-api-config" 
+		raml="api/employee-services-api.raml" 
+		outboundHeadersMapName="outboundHeaders" 
+		httpStatusVarName="httpStatus" />
+
+	<!-- Main API Entry Point -->
+	<flow name="employee-services-api-main">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/api/*" />
+		<apikit:router config-ref="employee-services-api-config" doc:name="Route to APIKit" />
+		<error-handler>
+			<on-error-propagate type="APIKIT:BAD_REQUEST">
+				<ee:transform doc:name="Transform Message">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Bad request"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="httpStatus">400</ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+			<on-error-propagate type="APIKIT:NOT_FOUND">
+				<ee:transform doc:name="Transform Message">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Resource not found"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="httpStatus">404</ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+			<on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED">
+				<ee:transform doc:name="Transform Message">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Method not allowed"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="httpStatus">405</ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+			<on-error-propagate type="APIKIT:NOT_ACCEPTABLE">
+				<ee:transform doc:name="Transform Message">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not acceptable"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="httpStatus">406</ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+			<on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE">
+				<ee:transform doc:name="Transform Message">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Unsupported media type"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="httpStatus">415</ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+			<on-error-propagate type="APIKIT:NOT_IMPLEMENTED">
+				<ee:transform doc:name="Transform Message">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not implemented"}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables>
+						<ee:set-variable variableName="httpStatus">501</ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+
+
+	<!-- Health Check Flow (No auth required) -->
+	<flow name="health-check-flow">
+		<http:listener doc:name="Listener"
+			config-ref="employee-services-api-httpListenerConfig"
+			path="/health" />
+		<try doc:name="Try">
+			<db:select doc:name="Test DB Connection"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql>SELECT 1 as health_check</db:sql>
+			</db:select>
+			<set-payload
+				value='{"status": "healthy", "database": "connected", "timestamp": "#[now()]"}'
+				doc:name="Set success message" />
+			<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+
+			<error-handler>
+				<on-error-propagate type="ANY" doc:name="Health Check Error">
+					<set-payload
+						value='{"status": "unhealthy", "database": "disconnected", "timestamp": "#[now()]"}'
+						doc:name="Set error message" />
+					<set-variable variableName="httpStatus" value="503" doc:name="Set 503 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- CORS Preflight Handler -->
+	<flow name="cors-preflight-flow">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/auth/*"
+			allowedMethods="OPTIONS">
+			<http:response statusCode="200">
+				<http:headers><![CDATA[#[{
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type, Authorization",
+					"Access-Control-Max-Age": "3600"
+				}]]]></http:headers>
+			</http:response>
+		</http:listener>
+		<set-payload value="" doc:name="Set empty payload" />
+	</flow>
+
+	<!-- Static Web Content Flow (No auth required) -->
+	<flow name="web-content-flow">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/web/*" />
+		<logger level="INFO" message="Serving static content: #[attributes.requestPath]"
+			doc:name="Log static request" />
+		<choice doc:name="Route to correct file">
+			<when expression="#[attributes.requestPath contains '/web/login' or attributes.requestPath == '/web/' or attributes.requestPath == '/web']">
+				<set-payload value="#[MuleSystemUtils.readFromClasspathFile('web/login.html')]"
+					doc:name="Serve Login Page" />
+				<set-variable variableName="contentType" value="text/html" doc:name="Set HTML content type" />
+			</when>
+			<when expression="#[attributes.requestPath contains '/web/register']">
+				<set-payload value="#[MuleSystemUtils.readFromClasspathFile('web/register.html')]"
+					doc:name="Serve Register Page" />
+				<set-variable variableName="contentType" value="text/html" doc:name="Set HTML content type" />
+			</when>
+			<otherwise>
+				<set-payload value='{"error": "Page not found"}' doc:name="Set 404 payload" />
+				<set-variable variableName="httpStatus" value="404" doc:name="Set 404 status" />
+				<set-variable variableName="contentType" value="application/json" doc:name="Set JSON content type" />
+			</otherwise>
+		</choice>
+	</flow>
+
+	<!-- User Registration Flow -->
+	<flow name="user-registration-flow">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/auth/register"
+			allowedMethods="POST">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers><![CDATA[#[{
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type, Authorization",
+					"Content-Type": "application/json"
+				}]]]></http:headers>
+			</http:response>
+		</http:listener>
+		<logger level="INFO" message="User registration request received"
+			doc:name="Log registration request" />
+		<try doc:name="Try">
+			<!-- Log raw payload for debugging -->
+			<logger level="INFO" message="Raw payload: #[payload]" doc:name="Log raw payload" />
+			<logger level="INFO" message="Content-Type: #[attributes.headers.'content-type']" doc:name="Log content type" />
+			
+			<!-- Parse JSON payload -->
+			<ee:transform doc:name="Parse JSON Payload">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+input payload application/json
+output application/java
+---
+payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			
+			<!-- Log parsed payload -->
+			<logger level="INFO" message="Parsed payload: #[payload]" doc:name="Log parsed payload" />
+			
+			<!-- Extract registration data -->
+			<ee:transform doc:name="Extract Registration Data">
+				<ee:variables>
+					<ee:set-variable variableName="firstName"><![CDATA[#[payload.firstName default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="lastName"><![CDATA[#[payload.lastName default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="email"><![CDATA[#[payload.email default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="username"><![CDATA[#[payload.username default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="password"><![CDATA[#[payload.password default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="passwordHash"><![CDATA[#[if (vars.password != null and vars.password != "") java!java::util::Base64::getEncoder().encodeToString((vars.password ++ "salt") as Binary) else ""]]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			
+			<!-- Log extracted variables -->
+			<logger level="INFO" message="Extracted variables - username: #[vars.username], email: #[vars.email], firstName: #[vars.firstName]" doc:name="Log extracted vars" />
+
+			<!-- Validate required fields -->
+			<choice doc:name="Validate required fields">
+				<when expression="#[vars.username == null or vars.username == '' or vars.password == null or vars.password == '' or vars.email == null or vars.email == '']">
+					<logger level="WARN" message="Missing required fields - username: #[vars.username], password: #[if(vars.password == null or vars.password == '') 'MISSING' else 'PROVIDED'], email: #[vars.email]" doc:name="Log missing fields" />
+					<set-payload value='{"error": "missing_fields", "error_description": "Username, password, and email are required"}' doc:name="Set missing fields error" />
+					<set-variable variableName="httpStatus" value="400" doc:name="Set 400 status" />
+				</when>
+				<otherwise>
+					<!-- Check if user already exists -->
+			<db:select doc:name="Check User Exists"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql><![CDATA[
+SELECT username, email FROM users
+WHERE username = :username OR email = :email
+				]]></db:sql>
+				<db:input-parameters><![CDATA[#[{username: vars.username, email: vars.email}]]]></db:input-parameters>
+			</db:select>
+
+			<choice doc:name="Check if user exists">
+				<when expression="#[payload != null and sizeOf(payload) > 0]">
+					<logger level="WARN" message="User already exists: #[vars.username]"
+						doc:name="Log existing user" />
+					<set-payload
+						value='{"error": "user_exists", "error_description": "Username or email already exists"}'
+						doc:name="Set user exists error" />
+					<set-variable variableName="httpStatus" value="409" doc:name="Set 409 status" />
+				</when>
+				<otherwise>
+					<!-- Create new user -->
+					<db:insert doc:name="Insert New User"
+						config-ref="PostgreSQL_Configuration">
+						<db:sql><![CDATA[
+INSERT INTO users (username, email, first_name, last_name, password_hash)
+VALUES (:username, :email, :firstName, :lastName, :passwordHash)
+						]]></db:sql>
+						<db:input-parameters><![CDATA[#[{
+  username: vars.username,
+  email: vars.email,
+  firstName: vars.firstName,
+  lastName: vars.lastName,
+  passwordHash: vars.passwordHash
+}]]]></db:input-parameters>
+					</db:insert>
+
+					<logger level="INFO" message="User created successfully: #[vars.username]"
+						doc:name="Log user created" />
+
+					<set-payload
+						value='{"message": "User created successfully", "username": "#[vars.username]"}'
+						doc:name="Set success response" />
+					<set-variable variableName="httpStatus" value="201" doc:name="Set 201 status" />
+					</otherwise>
+				</choice>
+				</otherwise>
+			</choice>
+
+			<error-handler>
+				<on-error-propagate type="DB:*" doc:name="Database Error">
+					<logger level="ERROR"
+						message="Database error during user registration: #[error.description]"
+						doc:name="Log DB error" />
+					<set-payload
+						value='{"error": "registration_failed", "error_description": "Database error occurred during registration"}'
+						doc:name="Set DB error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+				<on-error-propagate type="ANY" doc:name="Registration Error Handler">
+					<logger level="ERROR" message="Registration error: #[error.description]"
+						doc:name="Log registration error" />
+					<set-payload
+						value='{"error": "registration_failed", "error_description": "An error occurred during registration"}'
+						doc:name="Set server error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- User Login Flow -->
+	<flow name="user-login-flow">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/auth/login"
+			allowedMethods="POST">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers><![CDATA[#[{
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type, Authorization",
+					"Content-Type": "application/json"
+				}]]]></http:headers>
+			</http:response>
+		</http:listener>
+		<logger level="INFO" message="User login request received"
+			doc:name="Log login request" />
+		<try doc:name="Try">
+			<!-- Log raw payload for debugging -->
+			<logger level="INFO" message="Raw login payload: #[payload]" doc:name="Log raw payload" />
+			<logger level="INFO" message="Login request headers: #[attributes.headers]" doc:name="Log headers" />
+			
+			<!-- Parse JSON payload -->
+			<ee:transform doc:name="Parse JSON Payload">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+input payload application/json
+output application/java
+---
+payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			
+			<!-- Extract login credentials -->
+			<ee:transform doc:name="Extract Login Data">
+				<ee:variables>
+					<ee:set-variable variableName="username"><![CDATA[#[payload.username default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="password"><![CDATA[#[payload.password default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="passwordHash"><![CDATA[#[if (vars.password != null and vars.password != "") java!java::util::Base64::getEncoder().encodeToString((vars.password ++ "salt") as Binary) else ""]]]></ee:set-variable>
+					<ee:set-variable variableName="salesforceUserId"><![CDATA[#[payload.userId default payload.salesforce_user_id default null]]]></ee:set-variable>
+					<ee:set-variable variableName="clientIdFromPayload"><![CDATA[#[payload.clientId default payload.client_id default ""]]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<logger level="INFO" message="Login - Extracted variables: username=#[vars.username], salesforceUserId=#[vars.salesforceUserId], clientId=#[vars.clientIdFromPayload]" doc:name="Log extracted vars" />
+			
+			<!-- Validate required fields -->
+			<choice doc:name="Validate Required Fields">
+				<when expression="#[vars.username == '' or vars.password == '' or vars.clientIdFromPayload == '']">
+					<logger level="ERROR" message="Missing required fields for login" doc:name="Log validation error" />
+					<set-payload value='{"error": "invalid_request", "error_description": "Missing required fields: username, password, and clientId"}' doc:name="Set validation error" />
+					<set-variable variableName="httpStatus" value="400" doc:name="Set 400 status" />
+				</when>
+				<otherwise>
+
+			<!-- Validate user credentials -->
+			<db:select doc:name="Validate User Credentials"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql><![CDATA[
+SELECT user_id, username, email, first_name, last_name FROM users
+WHERE username = :username AND password_hash = :passwordHash AND is_active = true
+				]]></db:sql>
+				<db:input-parameters><![CDATA[#[{username: vars.username, passwordHash: vars.passwordHash}]]]></db:input-parameters>
+			</db:select>
+
+			<choice doc:name="Validate User">
+				<when expression="#[payload != null and sizeOf(payload) > 0]">
+					<!-- Valid user - create/update API client -->
+					<ee:transform doc:name="Extract User Data">
+						<ee:variables>
+							<ee:set-variable variableName="userId"><![CDATA[#[payload[0].user_id]]]></ee:set-variable>
+							<ee:set-variable variableName="clientId"><![CDATA[#[vars.clientIdFromPayload]]]></ee:set-variable>
+							<ee:set-variable variableName="clientSecret"><![CDATA[#[uuid() ++ "-" ++ now() as String]]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+
+					<!-- Check if API client already exists for user -->
+					<db:select doc:name="Check Existing API Client"
+						config-ref="PostgreSQL_Configuration">
+						<db:sql><![CDATA[
+SELECT client_id, client_secret FROM api_clients WHERE user_id = :userId
+						]]></db:sql>
+						<db:input-parameters><![CDATA[#[{userId: vars.userId}]]]></db:input-parameters>
+					</db:select>
+
+					<choice doc:name="API Client Exists">
+						<when expression="#[payload != null and sizeOf(payload) > 0]">
+							<!-- Use existing API client -->
+							<ee:transform doc:name="Use Existing Client">
+								<ee:variables>
+									<ee:set-variable variableName="clientId"><![CDATA[#[payload[0].client_id]]]></ee:set-variable>
+									<ee:set-variable variableName="clientSecret"><![CDATA[#[payload[0].client_secret]]]></ee:set-variable>
+								</ee:variables>
+							</ee:transform>
+						</when>
+						<otherwise>
+							<!-- Create new API client -->
+							<logger level="INFO" message="Login - About to create new API client - clientId: #[vars.clientId], userId: #[vars.userId], salesforceUserId: #[vars.salesforceUserId]" doc:name="Log new client params" />
+							<db:insert doc:name="Create API Client"
+								config-ref="PostgreSQL_Configuration">
+								<db:sql><![CDATA[
+INSERT INTO api_clients (client_id, client_secret, user_id, salesforce_user_id, is_active)
+VALUES (:clientId, :clientSecret, :userId, :salesforceUserId, true)
+								]]></db:sql>
+								<db:input-parameters><![CDATA[#[{
+  clientId: vars.clientId,
+  clientSecret: vars.clientSecret,
+  userId: vars.userId,
+  salesforceUserId: vars.salesforceUserId
+}]]]></db:input-parameters>
+							</db:insert>
+							<logger level="INFO" message="Login - New API client created successfully" doc:name="Log new client success" />
+						</otherwise>
+					</choice>
+
+					<!-- Generate access and refresh tokens -->
+					<ee:transform doc:name="Generate Tokens">
+						<ee:variables>
+							<ee:set-variable variableName="accessToken"><![CDATA[#[uuid() ++ "-" ++ now() as String]]]></ee:set-variable>
+							<ee:set-variable variableName="refreshToken"><![CDATA[#["refresh_" ++ uuid() ++ "-" ++ now() as String]]]></ee:set-variable>
+							<ee:set-variable variableName="expiresIn">3600</ee:set-variable>
+							<ee:set-variable variableName="refreshExpiresIn">2592000</ee:set-variable>
+							<ee:set-variable variableName="tokenType">"Bearer"</ee:set-variable>
+							<ee:set-variable variableName="tokenExpirationTime"><![CDATA[#[(now() + |PT1H|) as String {format: "yyyy-MM-dd HH:mm:ss"}]]]></ee:set-variable>
+							<ee:set-variable variableName="refreshExpirationTime"><![CDATA[#[(now() + |P30D|) as String {format: "yyyy-MM-dd HH:mm:ss"}]]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+
+					<!-- Update Token in Database -->
+					<logger level="INFO" message="Login - About to update DB - clientId: #[vars.clientId], salesforceUserId: #[vars.salesforceUserId], accessToken: #[vars.accessToken]" doc:name="Log DB update params" />
+					<db:update doc:name="Update Token in DB" config-ref="PostgreSQL_Configuration">
+						<db:sql><![CDATA[
+UPDATE api_clients SET 
+  access_token = :accessToken, 
+  expires_at = :expiresAt,
+  token_expires_at = :tokenExpiresAt,
+  refresh_token = :refreshToken,
+  refresh_token_expires_at = :refreshExpiresAt,
+  salesforce_user_id = :salesforceUserId,
+  is_active = true,
+  updated_at = CURRENT_TIMESTAMP
+WHERE client_id = :clientId
+						]]></db:sql>
+						<db:input-parameters><![CDATA[#[{
+  clientId: vars.clientId,
+  accessToken: vars.accessToken,
+  expiresAt: vars.tokenExpirationTime,
+  tokenExpiresAt: vars.tokenExpirationTime,
+  refreshToken: vars.refreshToken,
+  refreshExpiresAt: vars.refreshExpirationTime,
+  salesforceUserId: vars.salesforceUserId
+}]]]></db:input-parameters>
+					</db:update>
+					<logger level="INFO" message="Login - DB update completed successfully" doc:name="Log DB update success" />
+
+					<logger level="INFO"
+						message="Login successful for user: #[vars.username]"
+						doc:name="Log successful login" />
+
+					<!-- Return Token Response -->
+					<ee:transform doc:name="Login Success Response">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  access_token: vars.accessToken,
+  refresh_token: vars.refreshToken,
+  token_type: vars.tokenType,
+  expires_in: vars.expiresIn,
+  user_id: vars.salesforceUserId,
+  client_id: vars.clientId,
+  scope: "read write"
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+				</when>
+				<otherwise>
+					<!-- Invalid credentials -->
+					<logger level="WARN" message="Invalid login attempt for: #[vars.username]"
+						doc:name="Log invalid login" />
+					<set-payload
+						value='{"error": "invalid_credentials", "error_description": "Invalid username or password"}'
+						doc:name="Set invalid credentials error" />
+					<set-variable variableName="httpStatus" value="401" doc:name="Set 401 status" />
+				</otherwise>
+			</choice>
+				</otherwise>
+			</choice>
+
+			<error-handler>
+				<on-error-propagate type="DB:*" doc:name="Database Error">
+					<logger level="ERROR"
+						message="Database error during user login: #[error.description]"
+						doc:name="Log DB error" />
+					<set-payload
+						value='{"error": "login_failed", "error_description": "Database error occurred during login"}'
+						doc:name="Set DB error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+				<on-error-propagate type="ANY" doc:name="Login Error Handler">
+					<logger level="ERROR" message="Login error: #[error.description]"
+						doc:name="Log login error" />
+					<set-payload
+						value='{"error": "login_failed", "error_description": "An error occurred during login"}'
+						doc:name="Set server error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- Refresh Token Endpoint -->
+	<flow name="refresh-token-flow">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/auth/refresh-token"
+			allowedMethods="POST">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers><![CDATA[#[{
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type, Authorization",
+					"Content-Type": "application/json"
+				}]]]></http:headers>
+			</http:response>
+		</http:listener>
+		<logger level="INFO" message="Refresh token request received"
+			doc:name="Log refresh request" />
+		<try doc:name="Try">
+			<!-- Log raw payload for debugging -->
+			<logger level="INFO" message="Raw refresh token payload: #[payload]" doc:name="Log raw payload" />
+			
+			<!-- Parse JSON payload -->
+			<ee:transform doc:name="Parse JSON Payload">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+input payload application/json
+output application/java
+---
+payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			
+			<!-- Extract refresh token -->
+			<ee:transform doc:name="Extract Refresh Token">
+				<ee:variables>
+					<ee:set-variable variableName="refreshToken"><![CDATA[#[payload.refresh_token default ""]]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<logger level="INFO" message="Refresh - Extracted refresh token: #[vars.refreshToken]" doc:name="Log extracted token" />
+
+			<!-- Validate required fields -->
+			<choice doc:name="Validate refresh token">
+				<when expression="#[vars.refreshToken == null or vars.refreshToken == '']">
+					<logger level="WARN" message="Missing refresh token" doc:name="Log missing token" />
+					<set-payload value='{"error": "invalid_request", "error_description": "Refresh token is required"}' doc:name="Set missing token error" />
+					<set-variable variableName="httpStatus" value="400" doc:name="Set 400 status" />
+				</when>
+				<otherwise>
+					<!-- Validate refresh token against database -->
+					<db:select doc:name="Validate Refresh Token" config-ref="PostgreSQL_Configuration">
+						<db:sql><![CDATA[
+SELECT client_id, access_token, refresh_token, refresh_token_expires_at, salesforce_user_id, is_active
+FROM api_clients
+WHERE refresh_token = :refreshToken AND refresh_token_expires_at > :currentTime AND is_active = true
+						]]></db:sql>
+						<db:input-parameters><![CDATA[#[{refreshToken: vars.refreshToken, currentTime: now() as String {format: "yyyy-MM-dd HH:mm:ss"}}]]]></db:input-parameters>
+					</db:select>
+
+					<choice doc:name="Check if refresh token valid">
+						<when expression="#[payload == null or sizeOf(payload) == 0]">
+							<logger level="WARN" message="Invalid or expired refresh token: #[vars.refreshToken]" doc:name="Log invalid token" />
+							<set-payload value='{"error": "invalid_grant", "error_description": "Invalid or expired refresh token"}' doc:name="Set invalid token error" />
+							<set-variable variableName="httpStatus" value="401" doc:name="Set 401 status" />
+						</when>
+						<otherwise>
+							<!-- Valid refresh token - generate new tokens -->
+							<ee:transform doc:name="Extract Client Data">
+								<ee:variables>
+									<ee:set-variable variableName="clientId"><![CDATA[#[payload[0].client_id]]]></ee:set-variable>
+									<ee:set-variable variableName="salesforceUserId"><![CDATA[#[payload[0].salesforce_user_id]]]></ee:set-variable>
+								</ee:variables>
+							</ee:transform>
+
+							<logger level="INFO" message="Valid refresh token for client: #[vars.clientId]" doc:name="Log valid token" />
+
+							<!-- Generate new tokens -->
+							<ee:transform doc:name="Generate New Tokens">
+								<ee:variables>
+									<ee:set-variable variableName="newAccessToken"><![CDATA[#[uuid() ++ "-" ++ now() as String]]]></ee:set-variable>
+									<ee:set-variable variableName="newRefreshToken"><![CDATA[#["refresh_" ++ uuid() ++ "-" ++ now() as String]]]></ee:set-variable>
+									<ee:set-variable variableName="expiresIn">3600</ee:set-variable>
+									<ee:set-variable variableName="tokenType">"Bearer"</ee:set-variable>
+									<ee:set-variable variableName="tokenExpirationTime"><![CDATA[#[(now() + |PT1H|) as String {format: "yyyy-MM-dd HH:mm:ss"}]]]></ee:set-variable>
+									<ee:set-variable variableName="refreshExpirationTime"><![CDATA[#[(now() + |P30D|) as String {format: "yyyy-MM-dd HH:mm:ss"}]]]></ee:set-variable>
+								</ee:variables>
+							</ee:transform>
+
+							<!-- Update tokens in database -->
+							<db:update doc:name="Update Tokens" config-ref="PostgreSQL_Configuration">
+								<db:sql><![CDATA[
+UPDATE api_clients SET 
+  access_token = :newAccessToken,
+  expires_at = :tokenExpiresAt,
+  token_expires_at = :tokenExpiresAt,
+  refresh_token = :newRefreshToken,
+  refresh_token_expires_at = :refreshExpiresAt,
+  updated_at = CURRENT_TIMESTAMP
+WHERE client_id = :clientId
+								]]></db:sql>
+								<db:input-parameters><![CDATA[#[{
+  clientId: vars.clientId,
+  newAccessToken: vars.newAccessToken,
+  tokenExpiresAt: vars.tokenExpirationTime,
+  newRefreshToken: vars.newRefreshToken,
+  refreshExpiresAt: vars.refreshExpirationTime
+}]]]></db:input-parameters>
+							</db:update>
+
+							<logger level="INFO" message="Tokens refreshed successfully for client: #[vars.clientId]" doc:name="Log success" />
+
+							<!-- Return new tokens -->
+							<ee:transform doc:name="Refresh Success Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  access_token: vars.newAccessToken,
+  refresh_token: vars.newRefreshToken,
+  token_type: vars.tokenType,
+  expires_in: vars.expiresIn
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+						</otherwise>
+					</choice>
+				</otherwise>
+			</choice>
+
+			<error-handler>
+				<on-error-propagate type="DB:*" doc:name="Database Error">
+					<logger level="ERROR" message="Database error during refresh token: #[error.description]" doc:name="Log DB error" />
+					<set-payload value='{"error": "server_error", "error_description": "Database error occurred during token refresh"}' doc:name="Set DB error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+				<on-error-propagate type="ANY" doc:name="Refresh Error Handler">
+					<logger level="ERROR" message="Refresh token error: #[error.description]" doc:name="Log refresh error" />
+					<set-payload value='{"error": "server_error", "error_description": "An error occurred during token refresh"}' doc:name="Set server error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- Disconnect API Endpoint -->
+	<flow name="disconnect-api-flow">
+		<http:listener config-ref="employee-services-api-httpListenerConfig"
+			path="/api/disconnect"
+			allowedMethods="POST">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers><![CDATA[#[{
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type, Authorization",
+					"Access-Control-Max-Age": "3600"
+				}]]]></http:headers>
+			</http:response>
+		</http:listener>
+
+		<try>
+			<logger level="INFO" message="Disconnect API request received" doc:name="Log request" />
+			
+			<!-- Parse JSON Payload -->
+			<ee:transform doc:name="Parse JSON Payload">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+input payload application/json
+output application/java
+---
+payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			
+			<!-- Extract disconnect data -->
+			<ee:transform doc:name="Extract Disconnect Data">
+				<ee:variables>
+					<ee:set-variable variableName="salesforceUserId"><![CDATA[#[payload.userId default ""]]]></ee:set-variable>
+					<ee:set-variable variableName="clientId"><![CDATA[#[payload.clientId default ""]]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			
+			<logger level="INFO" message="Disconnect request - User ID: #[vars.salesforceUserId], Client ID: #[vars.clientId]" doc:name="Log disconnect data" />
+			
+			<!-- Validate required fields -->
+			<choice doc:name="Validate Required Fields">
+				<when expression="#[vars.salesforceUserId == '' or vars.clientId == '']">
+					<logger level="ERROR" message="Missing required fields for disconnect" doc:name="Log validation error" />
+					<set-payload value='{"error": "invalid_request", "error_description": "Missing required fields: userId and clientId"}' doc:name="Set validation error" />
+					<set-variable variableName="httpStatus" value="400" doc:name="Set 400 status" />
+				</when>
+				<otherwise>
+					<!-- Update database to mark user as inactive -->
+					<db:update doc:name="Deactivate User Connection" config-ref="PostgreSQL_Configuration">
+						<db:sql><![CDATA[
+UPDATE api_clients 
+SET is_active = false, 
+    updated_at = CURRENT_TIMESTAMP
+WHERE salesforce_user_id = :salesforceUserId 
+  AND client_id = :clientId 
+  AND is_active = true
+						]]></db:sql>
+						<db:input-parameters><![CDATA[#[{
+							salesforceUserId: vars.salesforceUserId,
+							clientId: vars.clientId
+						}]]]></db:input-parameters>
+					</db:update>
+					
+					<logger level="INFO" message="User connection deactivated - User ID: #[vars.salesforceUserId], Client ID: #[vars.clientId]" doc:name="Log successful disconnect" />
+					
+					<!-- Check if any rows were updated -->
+					<choice doc:name="Check Update Result">
+						<when expression="#[payload.affectedRows > 0]">
+							<logger level="INFO" message="Disconnect successful - #[payload.affectedRows] rows updated" doc:name="Log update success" />
+							<ee:transform doc:name="Success Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  status: "success",
+  message: "API connection disconnected successfully",
+  userId: vars.salesforceUserId,
+  clientId: vars.clientId,
+  timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+						</when>
+						<otherwise>
+							<logger level="WARN" message="No active connection found for disconnect - User ID: #[vars.salesforceUserId], Client ID: #[vars.clientId]" doc:name="Log no connection" />
+							<ee:transform doc:name="No Connection Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  status: "not_found",
+  message: "No active API connection found for this user",
+  userId: vars.salesforceUserId,
+  clientId: vars.clientId,
+  timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<set-variable variableName="httpStatus" value="404" doc:name="Set 404 status" />
+						</otherwise>
+					</choice>
+				</otherwise>
+			</choice>
+
+			<error-handler>
+				<on-error-propagate type="DB:*" doc:name="Database Error">
+					<logger level="ERROR" message="Database error during disconnect: #[error.description]" doc:name="Log DB error" />
+					<set-payload value='{"error": "server_error", "error_description": "Database error occurred during disconnect"}' doc:name="Set DB error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+				<on-error-propagate type="ANY" doc:name="Disconnect Error Handler">
+					<logger level="ERROR" message="Disconnect error: #[error.description]" doc:name="Log disconnect error" />
+					<set-payload value='{"error": "server_error", "error_description": "An error occurred during disconnect"}' doc:name="Set general error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- Endpoint: GET /employee/{employeeId}/goals -->
+	<flow
+		name="get:\employee\(employeeId)\goals:employee-services-api-config">
+		<!-- CRITICAL: Extract employeeId FIRST before token validation consumes HTTP attributes -->
+		<logger level="ERROR" message="=== EXTRACTING EMPLOYEEID BEFORE TOKEN VALIDATION ===" doc:name="Pre-validation debug" />
+		<logger level="ERROR" message="Pre-validation attributes: #[attributes]" doc:name="Log pre-validation attributes" />
+		<logger level="ERROR" message="Pre-validation URI params: #[attributes.uriParams]" doc:name="Log pre-validation URI params" />
+		<logger level="ERROR" message="Pre-validation request path: #[attributes.requestPath]" doc:name="Log pre-validation request path" />
+		
+		<!-- Extract employeeId immediately from APIKit URI params -->
+		<set-variable variableName="employeeId" value="#[attributes.uriParams.employeeId]" doc:name="Extract employeeId EARLY" />
+		<logger level="ERROR" message="Early extraction result: '#[vars.employeeId]'" doc:name="Log early extraction" />
+		
+		<flow-ref name="validate-token-subflow" doc:name="Validate OAuth Token" />
+		<choice doc:name="Check Token Validation Result">
+			<when expression="#[vars.httpStatus == 401]">
+				<!-- Token validation failed, return error payload that was already set -->
+				<logger level="WARN" message="Token validation failed for goals endpoint" doc:name="Log auth failure" />
+			</when>
+			<otherwise>
+				<!-- Use the employeeId extracted early, before token validation -->
+				<logger level="ERROR" message="Using early extracted employeeId: '#[vars.employeeId]'" doc:name="Log final employeeId" />
+				
+				<!-- Validate we have a valid employeeId -->
+				<choice doc:name="Check if employeeId was extracted">
+					<when expression="#[vars.employeeId == null or vars.employeeId == '']">
+						<logger level="ERROR" message="Critical error: employeeId not extracted from APIKit URI params" doc:name="Log critical error" />
+						<set-variable variableName="employeeId" value="unknown" doc:name="Set unknown fallback" />
+					</when>
+				</choice>
+				
+				<logger level="INFO" message="Processing request for employee goals: #[vars.employeeId]" doc:name="Log request" />
+				<try doc:name="Try">
+					<choice doc:name="Check if employeeId is valid for DB query">
+						<when expression="#[vars.employeeId != null and vars.employeeId != '' and vars.employeeId != 'unknown']">
+							<logger level="INFO" message="Executing database query with employeeId: '#[vars.employeeId]' (type: #[typeOf(vars.employeeId)])" doc:name="Log DB query start" />
+							<db:select doc:name="Select Employee Goals"
+								config-ref="PostgreSQL_Configuration">
+								<db:sql><![CDATA[
+SELECT goal FROM employee_goals WHERE employee_id = :employeeId
+]]></db:sql>
+								<db:input-parameters><![CDATA[#[{employeeId: vars.employeeId}]]]></db:input-parameters>
+							</db:select>
+							<logger level="INFO" message="Database query completed. Result count: #[sizeOf(payload)], Results: #[payload]" doc:name="Log DB query result" />
+						</when>
+						<otherwise>
+							<logger level="ERROR" message="Invalid employeeId for database query: #[vars.employeeId]" doc:name="Log invalid employeeId" />
+							<ee:transform doc:name="Set empty array result">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+[]]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</otherwise>
+					</choice>
+					<logger level="INFO" message="Database query result: #[payload]"
+						doc:name="Log DB result" />
+					<logger level="INFO" message="Query executed with employeeId parameter: #[vars.employeeId as String]" 
+						doc:name="Log executed query" />
+
+					<!-- Check if result is empty or null -->
+					<choice doc:name="Check if employee goals found">
+						<when expression="#[payload == null or sizeOf(payload) == 0]">
+							<logger level="WARN" message="No goals found for employee: #[vars.employeeId]"
+								doc:name="Log not found" />
+							<ee:transform doc:name="No Goals Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  "message": "No goals found for employee " ++ (vars.employeeId default "unknown")
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+						</when>
+						<otherwise>
+							<!-- Transform to simple goals array -->
+							<ee:transform doc:name="Transform to Goals Array">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload map $.goal]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+							<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+						</otherwise>
+					</choice>
+					<logger level="INFO" message="Final response payload: #[payload]"
+						doc:name="Log response" />
+
+					<error-handler>
+						<on-error-propagate type="DB:CONNECTIVITY" doc:name="Database Connectivity Error">
+							<logger level="ERROR"
+								message="Database connectivity error for employee: #[vars.employeeId] - #[error.description]"
+								doc:name="Log DB connectivity error" />
+							<set-payload
+								value='{"error": "Database connection failed", "employeeId": "#[vars.employeeId]", "details": "Unable to connect to database"}'
+								doc:name="Set DB connectivity error payload" />
+							<set-variable variableName="httpStatus" value="503" doc:name="Set 503 status" />
+						</on-error-propagate>
+						<on-error-propagate type="DB:*" doc:name="Database Error">
+							<logger level="ERROR"
+								message="Database error for employee: #[vars.employeeId] - #[error.description]"
+								doc:name="Log DB error" />
+							<set-payload
+								value='{"error": "Database query failed", "employeeId": "#[vars.employeeId]", "details": "#[error.description]"}'
+								doc:name="Set DB error payload" />
+							<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+						</on-error-propagate>
+						<on-error-propagate type="TRANSFORMATION" doc:name="Transformation Error">
+							<logger level="ERROR"
+								message="Transformation error for employee: #[vars.employeeId] - #[error.description]"
+								doc:name="Log transformation error" />
+							<set-payload
+								value='{"error": "Data transformation failed", "employeeId": "#[vars.employeeId]"}'
+								doc:name="Set transformation error payload" />
+							<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+						</on-error-propagate>
+						<on-error-propagate type="ANY" doc:name="General Error">
+							<logger level="ERROR"
+								message="Unexpected error for employee: #[vars.employeeId] - #[error.description]"
+								doc:name="Log general error" />
+							<set-payload
+								value='{"error": "Internal server error", "employeeId": "#[vars.employeeId]", "details": "An unexpected error occurred"}'
+								doc:name="Set general error payload" />
+							<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+						</on-error-propagate>
+					</error-handler>
+				</try>
+			</otherwise>
+		</choice>
+	</flow>
+
+	<!-- Endpoint: GET /employee/{employeeId}/learning-status -->
+	<flow
+		name="get:\employee\(employeeId)\learning-status:employee-services-api-config">
+		<flow-ref name="validate-token-subflow" doc:name="Validate OAuth Token" />
+		<choice doc:name="Check Token Validation Result">
+			<when expression="#[vars.httpStatus == 401]">
+				<!-- Token validation failed, return error payload that was already set -->
+				<logger level="WARN" message="Token validation failed for goals endpoint" doc:name="Log auth failure" />
+			</when>
+			<otherwise>
+				<set-variable variableName="employeeId" value="#[attributes.uriParams.employeeId]" doc:name="Extract employeeId from URI params" />
+				<choice doc:name="Check if employeeId extracted">
+					<when expression="#[vars.employeeId == null or vars.employeeId == '']">
+						<logger level="WARN" message="Failed to extract employeeId from URI params, trying path extraction" doc:name="Log extraction failure" />
+						<set-variable variableName="employeeId" value="#[(attributes.requestPath splitBy('/'))[3]]" doc:name="Extract from path" />
+					</when>
+				</choice>
+				<try doc:name="Try">
+			<db:select doc:name="Select Learning Status"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql><![CDATA[
+SELECT course, status FROM employee_learning WHERE employee_id = :employeeId
+]]></db:sql>
+				<db:input-parameters><![CDATA[#[{employeeId: vars.employeeId}]]]></db:input-parameters>
+			</db:select>
+
+			<choice doc:name="Check if learning records found">
+				<when expression="#[payload == null or sizeOf(payload) == 0]">
+					<set-payload
+						value='{"error": "Learning records not found", "employeeId": "#[vars.employeeId]"}'
+						doc:name="Set not found payload" />
+					<set-variable variableName="httpStatus" value="404" doc:name="Set 404 status" />
+				</when>
+				<otherwise>
+					<ee:transform doc:name="Transform to JSON Response">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+employeeId: vars.employeeId,
+learningStatus: payload,
+status: "success"
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+				</otherwise>
+			</choice>
+
+				<error-handler>
+					<on-error-propagate type="ANY" doc:name="General Error">
+						<set-payload
+							value='{"error": "Internal server error", "employeeId": "#[vars.employeeId]"}'
+							doc:name="Set error payload" />
+						<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+					</on-error-propagate>
+				</error-handler>
+			</try>
+		</otherwise>
+	</choice>
+	</flow>
+
+	<!-- Endpoint: GET /employee/{employeeId}/next-pay-date -->
+	<flow
+		name="get:\employee\(employeeId)\next-pay-date:employee-services-api-config">
+		<ee:transform doc:name="Transform Message">
+			<ee:variables>
+				<ee:set-variable
+					variableName="employeeId">attributes.uriParams.'employeeId'</ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<try doc:name="Try">
+			<db:select doc:name="Select Next Pay Date"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql><![CDATA[
+SELECT next_pay_date FROM employee_pto WHERE employee_id = :employeeId
+]]></db:sql>
+				<db:input-parameters><![CDATA[#[{employeeId: vars.employeeId}]]]></db:input-parameters>
+			</db:select>
+
+			<choice doc:name="Check if pay date found">
+				<when expression="#[payload == null or sizeOf(payload) == 0]">
+					<set-payload
+						value='{"error": "Pay date not found", "employeeId": "#[vars.employeeId]"}'
+						doc:name="Set not found payload" />
+					<set-variable variableName="httpStatus" value="404" doc:name="Set 404 status" />
+				</when>
+				<otherwise>
+					<ee:transform doc:name="Transform to JSON Response">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+employeeId: vars.employeeId,
+nextPayDate: payload[0].next_pay_date,
+status: "success"
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+				</otherwise>
+			</choice>
+
+			<error-handler>
+				<on-error-propagate type="ANY" doc:name="General Error">
+					<set-payload
+						value='{"error": "Internal server error", "employeeId": "#[vars.employeeId]"}'
+						doc:name="Set error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- Endpoint: GET /employee/{employeeId}/pto/balance -->
+	<flow
+		name="get:\employee\(employeeId)\pto\balance:employee-services-api-config">
+		<ee:transform doc:name="Transform Message">
+			<ee:variables>
+				<ee:set-variable
+					variableName="employeeId">attributes.uriParams.'employeeId'</ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<logger level="INFO" message="Received request for employee: #[vars.employeeId]"
+			doc:name="Log request" />
+		<try doc:name="Try">
+			<db:select doc:name="Select PTO Balance"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql><![CDATA[
+SELECT pto_balance FROM employee_pto WHERE employee_id = :employeeId
+]]></db:sql>
+				<db:input-parameters><![CDATA[#[{employeeId: vars.employeeId}]]]></db:input-parameters>
+			</db:select>
+			<logger level="INFO" message="Database query result: #[payload]"
+				doc:name="Log DB result" />
+
+			<!-- Check if result is empty or null -->
+			<choice doc:name="Check if employee found">
+				<when expression="#[payload == null or sizeOf(payload) == 0]">
+					<logger level="WARN"
+						message="No PTO record found for employee: #[vars.employeeId]"
+						doc:name="Log not found" />
+					<set-payload
+						value='{"error": "Employee PTO record not found", "employeeId": "#[vars.employeeId]"}'
+						doc:name="Set not found payload" />
+					<set-variable variableName="httpStatus" value="404" doc:name="Set 404 status" />
+				</when>
+				<otherwise>
+					<!-- Transform to proper JSON response -->
+					<ee:transform doc:name="Transform to JSON Response">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+employeeId: vars.employeeId,
+ptoBalance: payload[0].pto_balance,
+status: "success"
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+				</otherwise>
+			</choice>
+			<logger level="INFO" message="Final response payload: #[payload]"
+				doc:name="Log response" />
+
+			<error-handler>
+				<on-error-propagate type="DB:CONNECTIVITY" doc:name="Database Connectivity Error">
+					<logger level="ERROR"
+						message="Database connectivity error for employee: #[vars.employeeId] - #[error.description]"
+						doc:name="Log DB connectivity error" />
+					<set-payload
+						value='{"error": "Database connection failed", "employeeId": "#[vars.employeeId]", "details": "Unable to connect to database"}'
+						doc:name="Set DB connectivity error payload" />
+					<set-variable variableName="httpStatus" value="503" doc:name="Set 503 status" />
+				</on-error-propagate>
+				<on-error-propagate type="DB:*" doc:name="Database Error">
+					<logger level="ERROR"
+						message="Database error for employee: #[vars.employeeId] - #[error.description]"
+						doc:name="Log DB error" />
+					<set-payload
+						value='{"error": "Database query failed", "employeeId": "#[vars.employeeId]", "details": "#[error.description]"}'
+						doc:name="Set DB error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+				<on-error-propagate type="TRANSFORMATION" doc:name="Transformation Error">
+					<logger level="ERROR"
+						message="Transformation error for employee: #[vars.employeeId] - #[error.description]"
+						doc:name="Log transformation error" />
+					<set-payload
+						value='{"error": "Data transformation failed", "employeeId": "#[vars.employeeId]"}'
+						doc:name="Set transformation error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+				<on-error-propagate type="ANY" doc:name="General Error">
+					<logger level="ERROR"
+						message="Unexpected error for employee: #[vars.employeeId] - #[error.description]"
+						doc:name="Log general error" />
+					<set-payload
+						value='{"error": "Internal server error", "employeeId": "#[vars.employeeId]", "details": "An unexpected error occurred"}'
+						doc:name="Set general error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- Endpoint: POST /employee/{employeeId}/pto/schedule -->
+	<flow
+		name="post:\employee\(employeeId)\pto\schedule:application\json:employee-services-api-config">
+		<ee:transform doc:name="Extract Request Data">
+			<ee:variables>
+				<ee:set-variable
+					variableName="employeeId">attributes.uriParams.'employeeId'</ee:set-variable>
+				<ee:set-variable
+					variableName="startDate">payload.startDate</ee:set-variable>
+				<ee:set-variable
+					variableName="endDate">payload.endDate</ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<try doc:name="Try">
+			<db:update doc:name="Insert or Update PTO Schedule"
+				config-ref="PostgreSQL_Configuration">
+				<db:sql><![CDATA[
+INSERT INTO employee_pto (employee_id, next_pay_date)
+VALUES (:employeeId, :endDate)
+ON CONFLICT (employee_id) DO UPDATE SET
+next_pay_date = :endDate
+]]></db:sql>
+				<db:input-parameters><![CDATA[#[{employeeId: vars.employeeId, endDate: vars.endDate}]]]></db:input-parameters>
+			</db:update>
+
+			<ee:transform doc:name="Success Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+employeeId: vars.employeeId,
+startDate: vars.startDate,
+endDate: vars.endDate,
+status: "success",
+message: "PTO scheduled successfully"
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable variableName="httpStatus" value="200" doc:name="Set 200 status" />
+
+			<error-handler>
+				<on-error-propagate type="ANY" doc:name="General Error">
+					<set-payload
+						value='{"error": "Failed to schedule PTO", "employeeId": "#[vars.employeeId]"}'
+						doc:name="Set error payload" />
+					<set-variable variableName="httpStatus" value="500" doc:name="Set 500 status" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+</mule>

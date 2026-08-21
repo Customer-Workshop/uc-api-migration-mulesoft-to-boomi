@@ -1,0 +1,19 @@
+{
+  "case": "next-pay-date-found",
+  "description": "GET next-pay-date for 101 \u2014 DATE serialized as ISO string",
+  "request": {
+    "method": "GET",
+    "path": "/api/employee/101/next-pay-date",
+    "headers": {
+      "authorization": "Bearer seeded-valid-token-0001"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "employeeId": "101",
+      "nextPayDate": "2026-09-15",
+      "status": "success"
+    }
+  }
+}
