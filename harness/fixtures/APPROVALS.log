@@ -1,1 +1,2 @@
 2026-08-21T05:10:29.610947+00:00  initial golden fixtures authored from the MuleSoft source flows
+2026-08-21T05:35:45.390806+00:00  widen integrity fingerprint to cover boomi/schema/component.schema.json and boomi/routes.json (gate-coverage audit finding)

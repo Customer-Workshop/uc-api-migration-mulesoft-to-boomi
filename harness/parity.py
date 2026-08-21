@@ -44,6 +44,10 @@ MANIFEST = HARNESS_DIR / "fixtures" / "MANIFEST.sha256"
 REPORTS_DIR = HARNESS_DIR / "reports"
 SEED_FILES = [REPO_ROOT / "db" / "init" / "01-schema.sql", REPO_ROOT / "db" / "init" / "02-seed.sql"]
 SOURCE_XML = REPO_ROOT / "contracts" / "source" / "employee-services-api.xml"
+CONTRACT_FILES = [
+    REPO_ROOT / "boomi" / "schema" / "component.schema.json",
+    REPO_ROOT / "boomi" / "routes.json",
+]
 
 MASK_TOKEN = "__MASKED__"
 
@@ -54,10 +58,12 @@ def _sha256(path: Path) -> str:
 
 def fixture_fingerprint() -> dict:
     """Fingerprint every input that changes recorded behavior: the fixture
-    cases, the schema+seed, and the vendored source Mule XML."""
+    cases, the db schema+seed, the vendored source Mule XML, the component
+    JSON Schema, and the route manifest."""
     files = sorted(CASES_DIR.glob("*.json")) + [p for p in SEED_FILES if p.exists()]
     if SOURCE_XML.exists():
         files.append(SOURCE_XML)
+    files.extend(p for p in CONTRACT_FILES if p.exists())
     return {str(p.relative_to(REPO_ROOT)): _sha256(p) for p in files}
 
 

@@ -1,3 +1,5 @@
+b6a6322a57bc304c3470175dfc922a44e549ddfce6a541d278060dd928508c17  boomi/routes.json
+b230561e3ddfe2aba4f1ae2c297df5eb3d92674b0ee2cea834137d7af65ef014  boomi/schema/component.schema.json
 9433e00302bca3a23ff5ed56def1e092dc5e635b7fc2319f79a6456a4829391c  contracts/source/employee-services-api.xml
 ad5dda09a57b39d0bc43250f9d37950b15b91d356d50b31951b318a9bda1b14d  db/init/01-schema.sql
 446eae69d18c7fbecfc37f8297a05e53a4b4e74b87f970bd4218aa07ee4ac12f  db/init/02-seed.sql
