@@ -1,0 +1,25 @@
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="EMP - Schedule PTO">
+  <bns:object>
+    <process>
+      <route method="POST" path="/api/employee/{employeeId}/pto/schedule"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="auth"/>
+        <shape name="auth" shapetype="processcall" process="Common - Validate Token" next="upsert"/>
+        <shape name="upsert" shapetype="connectoraction" connector="database" operation="execute" next="mk_ok">
+          <sql>INSERT INTO employee_pto (employee_id, next_pay_date) VALUES (:employeeId, :endDate) ON CONFLICT (employee_id) DO UPDATE SET next_pay_date = :endDate</sql>
+          <parameter name="employeeId" kind="pathParam" ref="employeeId"/>
+          <parameter name="endDate" kind="body" path="$.endDate"/>
+        </shape>
+        <shape name="mk_ok" shapetype="map" next="ret_200">
+          <mapping to="employeeId" kind="pathParam" name="employeeId"/>
+          <mapping to="startDate" kind="body" path="$.startDate"/>
+          <mapping to="endDate" kind="body" path="$.endDate"/>
+          <mapping to="status" kind="literal" value="success"/>
+          <mapping to="message" kind="literal" value="PTO scheduled successfully"/>
+        </shape>
+        <shape name="ret_200" shapetype="returndocuments" status="200"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>
