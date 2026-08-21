@@ -1,0 +1,34 @@
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="Common - Validate Token">
+  <bns:object>
+    <process>
+      <shapes>
+        <shape name="start" shapetype="start" next="has_bearer"/>
+        <shape name="has_bearer" shapetype="decision" whenTrue="lookup" whenFalse="missing">
+          <condition operator="exists">
+            <left kind="header" name="authorization" path="bearer"/>
+          </condition>
+        </shape>
+        <shape name="missing" shapetype="message" next="missing_ret">
+          <template>{"error": "missing_token", "error_description": "Authorization header is missing or invalid"}</template>
+        </shape>
+        <shape name="missing_ret" shapetype="returndocuments" status="401" halt="true"/>
+        <shape name="lookup" shapetype="connectoraction" connector="database" operation="select" next="token_found">
+          <sql>SELECT access_token, expires_at, client_id FROM api_clients WHERE access_token = :token AND expires_at &gt; :currentTime</sql>
+          <parameter name="token" kind="header" ref="authorization" path="bearer"/>
+          <parameter name="currentTime" kind="function" function="now_iso"/>
+        </shape>
+        <shape name="token_found" shapetype="decision" whenTrue="ok" whenFalse="invalid">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="invalid" shapetype="message" next="invalid_ret">
+          <template>{"error": "invalid_token", "error_description": "Invalid or expired access token"}</template>
+        </shape>
+        <shape name="invalid_ret" shapetype="returndocuments" status="401" halt="true"/>
+        <shape name="ok" shapetype="returndocuments" status="200"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>

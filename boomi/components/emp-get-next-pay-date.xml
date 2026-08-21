@@ -1,0 +1,31 @@
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="EMP - Get Next Pay Date">
+  <bns:object>
+    <process>
+      <route method="GET" path="/api/employee/{employeeId}/next-pay-date"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="auth"/>
+        <shape name="auth" shapetype="processcall" process="Common - Validate Token" next="q"/>
+        <shape name="q" shapetype="connectoraction" connector="database" operation="select" next="found">
+          <sql>SELECT next_pay_date FROM employee_pto WHERE employee_id = :employeeId</sql>
+          <parameter name="employeeId" kind="pathParam" ref="employeeId"/>
+        </shape>
+        <shape name="found" shapetype="decision" whenTrue="mk_ok" whenFalse="mk_notfound">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="mk_notfound" shapetype="message" next="ret_404">
+          <template>{"error": "Pay date not found", "employeeId": "{{pathParam:employeeId}}"}</template>
+        </shape>
+        <shape name="ret_404" shapetype="returndocuments" status="404"/>
+        <shape name="mk_ok" shapetype="map" next="ret_200">
+          <mapping to="employeeId" kind="pathParam" name="employeeId"/>
+          <mapping to="nextPayDate" kind="payload" path="$[0].next_pay_date"/>
+          <mapping to="status" kind="literal" value="success"/>
+        </shape>
+        <shape name="ret_200" shapetype="returndocuments" status="200"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>
