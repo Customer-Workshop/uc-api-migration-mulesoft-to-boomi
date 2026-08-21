@@ -1,0 +1,41 @@
+{
+  "case": "register-success",
+  "description": "POST /auth/register creates a user; password hash is Base64(password + 'salt') per the source Mule flow",
+  "request": {
+    "method": "POST",
+    "path": "/auth/register",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "username": "newhire",
+      "password": "Welcome1!",
+      "email": "newhire@example.test",
+      "firstName": "New",
+      "lastName": "Hire"
+    }
+  },
+  "expected": {
+    "status": 201,
+    "body": {
+      "message": "User created successfully",
+      "username": "newhire"
+    }
+  },
+  "probes": [
+    {
+      "kind": "rows",
+      "description": "user row persisted with source hashing scheme Base64(password+'salt')",
+      "sql": "SELECT username, email, first_name, last_name, password_hash FROM users WHERE username = 'newhire'",
+      "expect": [
+        [
+          "newhire",
+          "newhire@example.test",
+          "New",
+          "Hire",
+          "V2VsY29tZTEhc2FsdA=="
+        ]
+      ]
+    }
+  ]
+}

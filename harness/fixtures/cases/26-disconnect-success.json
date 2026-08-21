@@ -1,0 +1,40 @@
+{
+  "case": "disconnect-success",
+  "description": "SOURCE QUIRK: POST /api/disconnect has NO token validation in the Mule source; deactivates matching active client",
+  "request": {
+    "method": "POST",
+    "path": "/api/disconnect",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "userId": "SF-USER-42",
+      "clientId": "crm-portal"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "status": "success",
+      "message": "API connection disconnected successfully",
+      "userId": "SF-USER-42",
+      "clientId": "crm-portal",
+      "timestamp": "__MASKED__"
+    }
+  },
+  "mask": [
+    "$.timestamp"
+  ],
+  "probes": [
+    {
+      "kind": "rows",
+      "description": "client deactivated",
+      "sql": "SELECT is_active FROM api_clients WHERE client_id = 'crm-portal'",
+      "expect": [
+        [
+          false
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SOURCE QUIRK: the Mule disconnect-api-flow performs NO token validation.
+     This process is deliberately unauthenticated to preserve parity; the
+     route is marked "auth": false in boomi/routes.json. -->
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="AUTH - Disconnect">
+  <bns:object>
+    <process>
+      <route method="POST" path="/api/disconnect"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="d_uid_ex"/>
+        <shape name="d_uid_ex" shapetype="decision" whenTrue="d_uid_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.userId"/>
+          </condition>
+        </shape>
+        <shape name="d_uid_empty" shapetype="decision" whenTrue="err_missing" whenFalse="d_cid_ex">
+          <condition operator="equals">
+            <left kind="body" path="$.userId"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="d_cid_ex" shapetype="decision" whenTrue="d_cid_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.clientId"/>
+          </condition>
+        </shape>
+        <shape name="d_cid_empty" shapetype="decision" whenTrue="err_missing" whenFalse="p_vars">
+          <condition operator="equals">
+            <left kind="body" path="$.clientId"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="p_vars" shapetype="properties" next="upd">
+          <property name="salesforceUserId" kind="body" path="$.userId"/>
+          <property name="clientId" kind="body" path="$.clientId"/>
+          <property name="ts" kind="function" function="now_iso"/>
+        </shape>
+        <shape name="upd" shapetype="connectoraction" connector="database" operation="execute" next="d_rows">
+          <sql>UPDATE api_clients SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE salesforce_user_id = :salesforceUserId AND client_id = :clientId AND is_active = true</sql>
+          <parameter name="salesforceUserId" kind="property" ref="salesforceUserId"/>
+          <parameter name="clientId" kind="property" ref="clientId"/>
+        </shape>
+        <shape name="d_rows" shapetype="decision" whenTrue="msg_404" whenFalse="msg_ok">
+          <condition operator="equals">
+            <left kind="payload" path="$.affectedRows"/>
+            <right kind="literal" value="0"/>
+          </condition>
+        </shape>
+        <shape name="err_missing" shapetype="message" status="400" next="ret400">
+          <template>{"error": "invalid_request", "error_description": "Missing required fields: userId and clientId"}</template>
+        </shape>
+        <shape name="msg_ok" shapetype="message" status="200" next="done">
+          <template>{"status": "success", "message": "API connection disconnected successfully", "userId": "{{property:salesforceUserId}}", "clientId": "{{property:clientId}}", "timestamp": "{{property:ts}}"}</template>
+        </shape>
+        <shape name="msg_404" shapetype="message" status="404" next="ret404">
+          <template>{"status": "not_found", "message": "No active API connection found for this user", "userId": "{{property:salesforceUserId}}", "clientId": "{{property:clientId}}", "timestamp": "{{property:ts}}"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+        <shape name="ret404" shapetype="returndocuments" status="404"/>
+        <shape name="ret400" shapetype="returndocuments" status="400"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>

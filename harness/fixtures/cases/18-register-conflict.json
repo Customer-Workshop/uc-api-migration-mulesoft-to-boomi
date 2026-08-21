@@ -1,0 +1,35 @@
+{
+  "case": "register-conflict",
+  "description": "POST /auth/register with an existing username returns the source's 409 user_exists body",
+  "request": {
+    "method": "POST",
+    "path": "/auth/register",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "username": "portal-svc",
+      "password": "AnyPass1!",
+      "email": "other@example.test"
+    }
+  },
+  "expected": {
+    "status": 409,
+    "body": {
+      "error": "user_exists",
+      "error_description": "Username or email already exists"
+    }
+  },
+  "probes": [
+    {
+      "kind": "rows",
+      "description": "no duplicate user row created",
+      "sql": "SELECT count(*)::int FROM users",
+      "expect": [
+        [
+          3
+        ]
+      ]
+    }
+  ]
+}

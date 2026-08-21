@@ -1,0 +1,40 @@
+{
+  "case": "disconnect-not-found",
+  "description": "POST /api/disconnect with no matching active connection returns the source's 404 not_found body",
+  "request": {
+    "method": "POST",
+    "path": "/api/disconnect",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "userId": "SF-USER-99",
+      "clientId": "crm-portal"
+    }
+  },
+  "expected": {
+    "status": 404,
+    "body": {
+      "status": "not_found",
+      "message": "No active API connection found for this user",
+      "userId": "SF-USER-99",
+      "clientId": "crm-portal",
+      "timestamp": "__MASKED__"
+    }
+  },
+  "mask": [
+    "$.timestamp"
+  ],
+  "probes": [
+    {
+      "kind": "rows",
+      "description": "client left active",
+      "sql": "SELECT is_active FROM api_clients WHERE client_id = 'crm-portal'",
+      "expect": [
+        [
+          true
+        ]
+      ]
+    }
+  ]
+}

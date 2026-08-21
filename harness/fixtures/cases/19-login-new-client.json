@@ -1,0 +1,63 @@
+{
+  "case": "login-new-client",
+  "description": "POST /auth/login for a user with no api client creates the client and issues token pair (source user-login-flow)",
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "username": "jdoe",
+      "password": "Secr3t!",
+      "clientId": "sf-int-client",
+      "userId": "SF-USER-9"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "access_token": "__MASKED__",
+      "refresh_token": "__MASKED__",
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "user_id": "SF-USER-9",
+      "client_id": "sf-int-client",
+      "scope": "read write"
+    }
+  },
+  "mask": [
+    "$.access_token",
+    "$.refresh_token"
+  ],
+  "probes": [
+    {
+      "kind": "response_db_match",
+      "description": "issued access token persisted on the new client",
+      "sql": "SELECT access_token FROM api_clients WHERE client_id = 'sf-int-client'",
+      "response_path": "$.access_token"
+    },
+    {
+      "kind": "rows",
+      "description": "new api client row linked to user with Salesforce id, active",
+      "sql": "SELECT user_id, salesforce_user_id, is_active FROM api_clients WHERE client_id = 'sf-int-client'",
+      "expect": [
+        [
+          2,
+          "SF-USER-9",
+          true
+        ]
+      ]
+    },
+    {
+      "kind": "rows",
+      "description": "refresh token expiry ~30 days out",
+      "sql": "SELECT refresh_token_expires_at > now() + interval '29 days' AND refresh_token_expires_at <= now() + interval '31 days' FROM api_clients WHERE client_id = 'sf-int-client'",
+      "expect": [
+        [
+          true
+        ]
+      ]
+    }
+  ]
+}

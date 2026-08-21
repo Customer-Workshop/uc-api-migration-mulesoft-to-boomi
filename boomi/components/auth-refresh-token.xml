@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="AUTH - Refresh Token">
+  <bns:object>
+    <process>
+      <route method="POST" path="/auth/refresh-token"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="d_rt_ex"/>
+        <shape name="d_rt_ex" shapetype="decision" whenTrue="d_rt_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.refresh_token"/>
+          </condition>
+        </shape>
+        <shape name="d_rt_empty" shapetype="decision" whenTrue="err_missing" whenFalse="sel">
+          <condition operator="equals">
+            <left kind="body" path="$.refresh_token"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="sel" shapetype="connectoraction" connector="database" operation="select" next="d_valid">
+          <sql>SELECT client_id, access_token, refresh_token, refresh_token_expires_at, salesforce_user_id, is_active FROM api_clients WHERE refresh_token = :refreshToken AND refresh_token_expires_at &gt; :currentTime AND is_active = true</sql>
+          <parameter name="refreshToken" kind="body" path="$.refresh_token"/>
+          <parameter name="currentTime" kind="function" function="now_iso"/>
+        </shape>
+        <shape name="d_valid" shapetype="decision" whenTrue="p_client" whenFalse="err_grant">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="p_client" shapetype="properties" next="gen">
+          <property name="clientId" kind="payload" path="$[0].client_id"/>
+        </shape>
+        <shape name="gen" shapetype="properties" next="upd">
+          <property name="newAccessToken" kind="function" function="uuid"/>
+          <property name="newRefreshToken" kind="function" function="uuid"/>
+          <property name="tokenExpiresAt" kind="function" function="now_plus_seconds" args="[3600]"/>
+          <property name="refreshExpiresAt" kind="function" function="now_plus_seconds" args="[2592000]"/>
+        </shape>
+        <shape name="upd" shapetype="connectoraction" connector="database" operation="execute" next="msg_ok">
+          <sql>UPDATE api_clients SET access_token = :newAccessToken, expires_at = :tokenExpiresAt, token_expires_at = :tokenExpiresAt, refresh_token = :newRefreshToken, refresh_token_expires_at = :refreshExpiresAt, updated_at = CURRENT_TIMESTAMP WHERE client_id = :clientId</sql>
+          <parameter name="newAccessToken" kind="property" ref="newAccessToken"/>
+          <parameter name="tokenExpiresAt" kind="property" ref="tokenExpiresAt"/>
+          <parameter name="newRefreshToken" kind="property" ref="newRefreshToken"/>
+          <parameter name="refreshExpiresAt" kind="property" ref="refreshExpiresAt"/>
+          <parameter name="clientId" kind="property" ref="clientId"/>
+        </shape>
+        <shape name="msg_ok" shapetype="message" status="200" next="done">
+          <template>{"access_token": "{{property:newAccessToken}}", "refresh_token": "{{property:newRefreshToken}}", "token_type": "Bearer", "expires_in": 3600}</template>
+        </shape>
+        <shape name="err_missing" shapetype="message" status="400" next="ret400">
+          <template>{"error": "invalid_request", "error_description": "Refresh token is required"}</template>
+        </shape>
+        <shape name="err_grant" shapetype="message" status="401" next="ret401">
+          <template>{"error": "invalid_grant", "error_description": "Invalid or expired refresh token"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+        <shape name="ret400" shapetype="returndocuments" status="400"/>
+        <shape name="ret401" shapetype="returndocuments" status="401"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>

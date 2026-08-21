@@ -1,0 +1,19 @@
+{
+  "case": "refresh-token-missing",
+  "description": "POST /auth/refresh-token without refresh_token returns the source's 400 invalid_request body",
+  "request": {
+    "method": "POST",
+    "path": "/auth/refresh-token",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {}
+  },
+  "expected": {
+    "status": 400,
+    "body": {
+      "error": "invalid_request",
+      "error_description": "Refresh token is required"
+    }
+  }
+}

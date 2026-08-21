@@ -29,3 +29,17 @@ INSERT INTO employee_learning (employee_id, course, status) VALUES
 INSERT INTO employee_pto (employee_id, pto_balance, next_pay_date) VALUES
     ('101', 12.5, '2026-09-15'),
     ('74',  3.0,  '2026-09-15');
+
+-- Wave 2 (auth lifecycle) seed. Password hashes use the source Mule scheme:
+-- Base64(password || 'salt'). jdoe ('Secr3t!') has NO api client (login
+-- creates one); jsmith ('Hunter2!') is pre-linked to 'crm-portal', which also
+-- carries a non-expired seeded refresh token and an active Salesforce
+-- connection for the refresh/disconnect fixtures.
+INSERT INTO users (username, email, first_name, last_name, password_hash) VALUES
+    ('jdoe',   'jdoe@example.test',   'Jane', 'Doe',   'U2VjcjN0IXNhbHQ='),
+    ('jsmith', 'jsmith@example.test', 'John', 'Smith', 'SHVudGVyMiFzYWx0');
+
+INSERT INTO api_clients (client_id, client_secret, user_id, access_token, expires_at,
+                         salesforce_user_id, refresh_token, refresh_token_expires_at, is_active) VALUES
+    ('crm-portal', 'crm-portal-secret', 3, 'seeded-crm-token-0001', '2099-01-01 00:00:00',
+     'SF-USER-42', 'seeded-refresh-token-0001', '2099-01-01 00:00:00', true);

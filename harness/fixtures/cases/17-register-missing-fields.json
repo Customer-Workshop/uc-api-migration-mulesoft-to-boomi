@@ -1,0 +1,33 @@
+{
+  "case": "register-missing-fields",
+  "description": "POST /auth/register without password/email returns the source's 400 missing_fields body",
+  "request": {
+    "method": "POST",
+    "path": "/auth/register",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "username": "onlyname"
+    }
+  },
+  "expected": {
+    "status": 400,
+    "body": {
+      "error": "missing_fields",
+      "error_description": "Username, password, and email are required"
+    }
+  },
+  "probes": [
+    {
+      "kind": "rows",
+      "description": "no user row created",
+      "sql": "SELECT count(*)::int FROM users",
+      "expect": [
+        [
+          3
+        ]
+      ]
+    }
+  ]
+}

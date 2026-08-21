@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="AUTH - Register User">
+  <bns:object>
+    <process>
+      <route method="POST" path="/auth/register"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="d_u_ex"/>
+        <shape name="d_u_ex" shapetype="decision" whenTrue="d_u_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.username"/>
+          </condition>
+        </shape>
+        <shape name="d_u_empty" shapetype="decision" whenTrue="err_missing" whenFalse="d_p_ex">
+          <condition operator="equals">
+            <left kind="body" path="$.username"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="d_p_ex" shapetype="decision" whenTrue="d_p_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.password"/>
+          </condition>
+        </shape>
+        <shape name="d_p_empty" shapetype="decision" whenTrue="err_missing" whenFalse="d_e_ex">
+          <condition operator="equals">
+            <left kind="body" path="$.password"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="d_e_ex" shapetype="decision" whenTrue="d_e_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.email"/>
+          </condition>
+        </shape>
+        <shape name="d_e_empty" shapetype="decision" whenTrue="err_missing" whenFalse="d_fn">
+          <condition operator="equals">
+            <left kind="body" path="$.email"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="d_fn" shapetype="decision" whenTrue="p_fn" whenFalse="p_fn_def">
+          <condition operator="exists">
+            <left kind="body" path="$.firstName"/>
+          </condition>
+        </shape>
+        <shape name="p_fn" shapetype="properties" next="d_ln">
+          <property name="firstName" kind="body" path="$.firstName"/>
+        </shape>
+        <shape name="p_fn_def" shapetype="properties" next="d_ln">
+          <property name="firstName" kind="literal" value=""/>
+        </shape>
+        <shape name="d_ln" shapetype="decision" whenTrue="p_ln" whenFalse="p_ln_def">
+          <condition operator="exists">
+            <left kind="body" path="$.lastName"/>
+          </condition>
+        </shape>
+        <shape name="p_ln" shapetype="properties" next="p_req">
+          <property name="lastName" kind="body" path="$.lastName"/>
+        </shape>
+        <shape name="p_ln_def" shapetype="properties" next="p_req">
+          <property name="lastName" kind="literal" value=""/>
+        </shape>
+        <shape name="p_req" shapetype="properties" next="chk">
+          <property name="username" kind="body" path="$.username"/>
+        </shape>
+        <shape name="chk" shapetype="connectoraction" connector="database" operation="select" next="d_dup">
+          <sql>SELECT username, email FROM users WHERE username = :username OR email = :email</sql>
+          <parameter name="username" kind="body" path="$.username"/>
+          <parameter name="email" kind="body" path="$.email"/>
+        </shape>
+        <shape name="d_dup" shapetype="decision" whenTrue="err_conflict" whenFalse="ins">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="ins" shapetype="connectoraction" connector="database" operation="execute" next="msg_ok">
+          <sql>INSERT INTO users (username, email, first_name, last_name, password_hash) VALUES (:username, :email, :firstName, :lastName, encode(convert_to(:password || 'salt', 'UTF8'), 'base64'))</sql>
+          <parameter name="username" kind="body" path="$.username"/>
+          <parameter name="email" kind="body" path="$.email"/>
+          <parameter name="firstName" kind="property" ref="firstName"/>
+          <parameter name="lastName" kind="property" ref="lastName"/>
+          <parameter name="password" kind="body" path="$.password"/>
+        </shape>
+        <shape name="msg_ok" shapetype="message" status="201" next="done">
+          <template>{"message": "User created successfully", "username": "{{property:username}}"}</template>
+        </shape>
+        <shape name="err_missing" shapetype="message" status="400" next="ret400">
+          <template>{"error": "missing_fields", "error_description": "Username, password, and email are required"}</template>
+        </shape>
+        <shape name="err_conflict" shapetype="message" status="409" next="ret409">
+          <template>{"error": "user_exists", "error_description": "Username or email already exists"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="201"/>
+        <shape name="ret400" shapetype="returndocuments" status="400"/>
+        <shape name="ret409" shapetype="returndocuments" status="409"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>

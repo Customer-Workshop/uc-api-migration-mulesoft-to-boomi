@@ -19,7 +19,14 @@ CREATE TABLE api_clients (
     user_id INTEGER REFERENCES users(user_id),
     access_token VARCHAR(255),
     expires_at TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
+    is_active BOOLEAN DEFAULT TRUE,
+    -- Wave 2 (auth lifecycle): columns the Mule login/refresh/disconnect flows
+    -- read and write; absent from the wave-1 consolidation.
+    salesforce_user_id VARCHAR(255),
+    token_expires_at TIMESTAMP,
+    refresh_token VARCHAR(255),
+    refresh_token_expires_at TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE employee_goals (
@@ -44,3 +51,4 @@ CREATE TABLE employee_pto (
 CREATE INDEX idx_api_clients_token ON api_clients(access_token);
 CREATE INDEX idx_goals_employee ON employee_goals(employee_id);
 CREATE INDEX idx_learning_employee ON employee_learning(employee_id);
+CREATE INDEX idx_api_clients_refresh ON api_clients(refresh_token);

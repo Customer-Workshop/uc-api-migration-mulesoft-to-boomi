@@ -1,0 +1,46 @@
+{
+  "case": "refresh-token-success",
+  "description": "POST /auth/refresh-token rotates BOTH tokens (source refresh-token-flow)",
+  "request": {
+    "method": "POST",
+    "path": "/auth/refresh-token",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "refresh_token": "seeded-refresh-token-0001"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "access_token": "__MASKED__",
+      "refresh_token": "__MASKED__",
+      "token_type": "Bearer",
+      "expires_in": 3600
+    }
+  },
+  "mask": [
+    "$.access_token",
+    "$.refresh_token"
+  ],
+  "probes": [
+    {
+      "kind": "response_db_match",
+      "description": "new access token persisted",
+      "sql": "SELECT access_token FROM api_clients WHERE client_id = 'crm-portal'",
+      "response_path": "$.access_token"
+    },
+    {
+      "kind": "rows",
+      "description": "refresh token rotated away from seeded value",
+      "sql": "SELECT refresh_token <> 'seeded-refresh-token-0001', access_token <> 'seeded-crm-token-0001' FROM api_clients WHERE client_id = 'crm-portal'",
+      "expect": [
+        [
+          true,
+          true
+        ]
+      ]
+    }
+  ]
+}

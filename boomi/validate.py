@@ -79,7 +79,7 @@ def main() -> int:
         route_errors = []
         if len(matches) != 1:
             route_errors.append("missing" if not matches else "duplicate")
-        elif route["path"].startswith("/api/"):
+        elif route.get("auth", route["path"].startswith("/api/")):
             component = matches[0]
             calls = [
                 s for s in component["shapes"]

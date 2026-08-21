@@ -1,0 +1,22 @@
+{
+  "case": "login-missing-fields",
+  "description": "POST /auth/login without clientId returns the source's 400 invalid_request body",
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "username": "jdoe",
+      "password": "Secr3t!"
+    }
+  },
+  "expected": {
+    "status": 400,
+    "body": {
+      "error": "invalid_request",
+      "error_description": "Missing required fields: username, password, and clientId"
+    }
+  }
+}

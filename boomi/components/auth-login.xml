@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="AUTH - Login">
+  <bns:object>
+    <process>
+      <route method="POST" path="/auth/login"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="d_un_ex"/>
+        <shape name="d_un_ex" shapetype="decision" whenTrue="d_un_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.username"/>
+          </condition>
+        </shape>
+        <shape name="d_un_empty" shapetype="decision" whenTrue="err_missing" whenFalse="d_pw_ex">
+          <condition operator="equals">
+            <left kind="body" path="$.username"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="d_pw_ex" shapetype="decision" whenTrue="d_pw_empty" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.password"/>
+          </condition>
+        </shape>
+        <shape name="d_pw_empty" shapetype="decision" whenTrue="err_missing" whenFalse="d_cid1">
+          <condition operator="equals">
+            <left kind="body" path="$.password"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="d_cid1" shapetype="decision" whenTrue="p_cid1" whenFalse="d_cid2">
+          <condition operator="exists">
+            <left kind="body" path="$.clientId"/>
+          </condition>
+        </shape>
+        <shape name="p_cid1" shapetype="properties" next="d_cid_empty">
+          <property name="clientId" kind="body" path="$.clientId"/>
+        </shape>
+        <shape name="d_cid2" shapetype="decision" whenTrue="p_cid2" whenFalse="err_missing">
+          <condition operator="exists">
+            <left kind="body" path="$.client_id"/>
+          </condition>
+        </shape>
+        <shape name="p_cid2" shapetype="properties" next="d_cid_empty">
+          <property name="clientId" kind="body" path="$.client_id"/>
+        </shape>
+        <shape name="d_cid_empty" shapetype="decision" whenTrue="err_missing" whenFalse="d_uid1">
+          <condition operator="equals">
+            <left kind="property" name="clientId"/>
+            <right kind="literal" value=""/>
+          </condition>
+        </shape>
+        <shape name="d_uid1" shapetype="decision" whenTrue="p_uid1" whenFalse="d_uid2">
+          <condition operator="exists">
+            <left kind="body" path="$.userId"/>
+          </condition>
+        </shape>
+        <shape name="p_uid1" shapetype="properties" next="sel_user">
+          <property name="salesforceUserId" kind="body" path="$.userId"/>
+        </shape>
+        <shape name="d_uid2" shapetype="decision" whenTrue="p_uid2" whenFalse="sel_user">
+          <condition operator="exists">
+            <left kind="body" path="$.salesforce_user_id"/>
+          </condition>
+        </shape>
+        <shape name="p_uid2" shapetype="properties" next="sel_user">
+          <property name="salesforceUserId" kind="body" path="$.salesforce_user_id"/>
+        </shape>
+        <shape name="sel_user" shapetype="connectoraction" connector="database" operation="select" next="d_user">
+          <sql>SELECT user_id, username, email, first_name, last_name FROM users WHERE username = :username AND password_hash = encode(convert_to(:password || 'salt', 'UTF8'), 'base64') AND is_active = true</sql>
+          <parameter name="username" kind="body" path="$.username"/>
+          <parameter name="password" kind="body" path="$.password"/>
+        </shape>
+        <shape name="d_user" shapetype="decision" whenTrue="p_user" whenFalse="err_creds">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="p_user" shapetype="properties" next="sel_client">
+          <property name="userId" kind="payload" path="$[0].user_id"/>
+          <property name="clientSecret" kind="function" function="uuid"/>
+        </shape>
+        <shape name="sel_client" shapetype="connectoraction" connector="database" operation="select" next="d_client">
+          <sql>SELECT client_id, client_secret FROM api_clients WHERE user_id = :userId</sql>
+          <parameter name="userId" kind="property" ref="userId"/>
+        </shape>
+        <shape name="d_client" shapetype="decision" whenTrue="p_useclient" whenFalse="ins_client">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="p_useclient" shapetype="properties" next="gen">
+          <property name="clientId" kind="payload" path="$[0].client_id"/>
+        </shape>
+        <shape name="ins_client" shapetype="connectoraction" connector="database" operation="execute" next="gen">
+          <sql>INSERT INTO api_clients (client_id, client_secret, user_id, salesforce_user_id, is_active) VALUES (:clientId, :clientSecret, :userId, :salesforceUserId, true)</sql>
+          <parameter name="clientId" kind="property" ref="clientId"/>
+          <parameter name="clientSecret" kind="property" ref="clientSecret"/>
+          <parameter name="userId" kind="property" ref="userId"/>
+          <parameter name="salesforceUserId" kind="property" ref="salesforceUserId"/>
+        </shape>
+        <shape name="gen" shapetype="properties" next="upd">
+          <property name="accessToken" kind="function" function="uuid"/>
+          <property name="refreshToken" kind="function" function="uuid"/>
+          <property name="tokenExpiresAt" kind="function" function="now_plus_seconds" args="[3600]"/>
+          <property name="refreshExpiresAt" kind="function" function="now_plus_seconds" args="[2592000]"/>
+        </shape>
+        <shape name="upd" shapetype="connectoraction" connector="database" operation="execute" next="d_has_uid">
+          <sql>UPDATE api_clients SET access_token = :accessToken, expires_at = :tokenExpiresAt, token_expires_at = :tokenExpiresAt, refresh_token = :refreshToken, refresh_token_expires_at = :refreshExpiresAt, salesforce_user_id = :salesforceUserId, is_active = true, updated_at = CURRENT_TIMESTAMP WHERE client_id = :clientId</sql>
+          <parameter name="accessToken" kind="property" ref="accessToken"/>
+          <parameter name="tokenExpiresAt" kind="property" ref="tokenExpiresAt"/>
+          <parameter name="refreshToken" kind="property" ref="refreshToken"/>
+          <parameter name="refreshExpiresAt" kind="property" ref="refreshExpiresAt"/>
+          <parameter name="salesforceUserId" kind="property" ref="salesforceUserId"/>
+          <parameter name="clientId" kind="property" ref="clientId"/>
+        </shape>
+        <shape name="d_has_uid" shapetype="decision" whenTrue="msg_ok" whenFalse="msg_ok_null">
+          <condition operator="exists">
+            <left kind="property" name="salesforceUserId"/>
+          </condition>
+        </shape>
+        <shape name="msg_ok" shapetype="message" status="200" next="done">
+          <template>{"access_token": "{{property:accessToken}}", "refresh_token": "{{property:refreshToken}}", "token_type": "Bearer", "expires_in": 3600, "user_id": "{{property:salesforceUserId}}", "client_id": "{{property:clientId}}", "scope": "read write"}</template>
+        </shape>
+        <shape name="msg_ok_null" shapetype="message" status="200" next="done">
+          <template>{"access_token": "{{property:accessToken}}", "refresh_token": "{{property:refreshToken}}", "token_type": "Bearer", "expires_in": 3600, "user_id": null, "client_id": "{{property:clientId}}", "scope": "read write"}</template>
+        </shape>
+        <shape name="err_missing" shapetype="message" status="400" next="ret400">
+          <template>{"error": "invalid_request", "error_description": "Missing required fields: username, password, and clientId"}</template>
+        </shape>
+        <shape name="err_creds" shapetype="message" status="401" next="ret401">
+          <template>{"error": "invalid_credentials", "error_description": "Invalid username or password"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+        <shape name="ret400" shapetype="returndocuments" status="400"/>
+        <shape name="ret401" shapetype="returndocuments" status="401"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>

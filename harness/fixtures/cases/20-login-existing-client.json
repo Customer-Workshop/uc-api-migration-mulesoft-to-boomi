@@ -1,0 +1,61 @@
+{
+  "case": "login-existing-client",
+  "description": "SOURCE QUIRK: login reuses the user's existing api client and returns ITS client_id, ignoring the requested clientId",
+  "request": {
+    "method": "POST",
+    "path": "/auth/login",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "username": "jsmith",
+      "password": "Hunter2!",
+      "clientId": "requested-but-ignored",
+      "userId": "SF-USER-42"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "access_token": "__MASKED__",
+      "refresh_token": "__MASKED__",
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "user_id": "SF-USER-42",
+      "client_id": "crm-portal",
+      "scope": "read write"
+    }
+  },
+  "mask": [
+    "$.access_token",
+    "$.refresh_token"
+  ],
+  "probes": [
+    {
+      "kind": "rows",
+      "description": "requested client id was NOT created",
+      "sql": "SELECT count(*)::int FROM api_clients WHERE client_id = 'requested-but-ignored'",
+      "expect": [
+        [
+          0
+        ]
+      ]
+    },
+    {
+      "kind": "response_db_match",
+      "description": "new access token persisted on the existing client",
+      "sql": "SELECT access_token FROM api_clients WHERE client_id = 'crm-portal'",
+      "response_path": "$.access_token"
+    },
+    {
+      "kind": "rows",
+      "description": "seeded refresh token rotated",
+      "sql": "SELECT refresh_token <> 'seeded-refresh-token-0001' FROM api_clients WHERE client_id = 'crm-portal'",
+      "expect": [
+        [
+          true
+        ]
+      ]
+    }
+  ]
+}

@@ -5,5 +5,9 @@
   {"method": "GET", "path": "/api/employee/{employeeId}/learning-status"},
   {"method": "GET", "path": "/api/employee/{employeeId}/next-pay-date"},
   {"method": "GET", "path": "/api/employee/{employeeId}/pto/balance"},
-  {"method": "POST", "path": "/api/employee/{employeeId}/pto/schedule"}
+  {"method": "POST", "path": "/api/employee/{employeeId}/pto/schedule"},
+  {"method": "POST", "path": "/auth/register"},
+  {"method": "POST", "path": "/auth/login"},
+  {"method": "POST", "path": "/auth/refresh-token"},
+  {"method": "POST", "path": "/api/disconnect", "auth": false}
 ]

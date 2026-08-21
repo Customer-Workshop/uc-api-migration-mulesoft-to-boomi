@@ -1,0 +1,21 @@
+{
+  "case": "refresh-token-invalid",
+  "description": "POST /auth/refresh-token with an unknown token returns the source's 401 invalid_grant body",
+  "request": {
+    "method": "POST",
+    "path": "/auth/refresh-token",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "refresh_token": "no-such-token"
+    }
+  },
+  "expected": {
+    "status": 401,
+    "body": {
+      "error": "invalid_grant",
+      "error_description": "Invalid or expired refresh token"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "case": "disconnect-missing-fields",
+  "description": "POST /api/disconnect without clientId returns the source's 400 invalid_request body",
+  "request": {
+    "method": "POST",
+    "path": "/api/disconnect",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "userId": "SF-USER-42"
+    }
+  },
+  "expected": {
+    "status": 400,
+    "body": {
+      "error": "invalid_request",
+      "error_description": "Missing required fields: userId and clientId"
+    }
+  }
+}
