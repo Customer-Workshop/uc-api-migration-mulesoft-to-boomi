@@ -1,0 +1,45 @@
+{
+  "case": "oauth-token-valid",
+  "description": "POST /oauth/token with valid client credentials (JSON body)",
+  "request": {
+    "method": "POST",
+    "path": "/oauth/token",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "client_id": "demo-portal",
+      "client_secret": "demo-portal-secret"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "access_token": "__MASKED__",
+      "token_type": "Bearer",
+      "expires_in": 3600,
+      "scope": "read write"
+    }
+  },
+  "mask": [
+    "$.access_token"
+  ],
+  "probes": [
+    {
+      "kind": "response_db_match",
+      "description": "issued token must be persisted for the client",
+      "sql": "SELECT access_token FROM api_clients WHERE client_id = 'demo-portal'",
+      "response_path": "$.access_token"
+    },
+    {
+      "kind": "rows",
+      "description": "stored expiry must be in the future (~1h)",
+      "sql": "SELECT expires_at > now() AND expires_at <= now() + interval '2 hours' FROM api_clients WHERE client_id = 'demo-portal'",
+      "expect": [
+        [
+          true
+        ]
+      ]
+    }
+  ]
+}

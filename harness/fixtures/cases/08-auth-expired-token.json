@@ -1,0 +1,18 @@
+{
+  "case": "auth-expired-token",
+  "description": "protected endpoint with an expired bearer token",
+  "request": {
+    "method": "GET",
+    "path": "/api/employee/101/goals",
+    "headers": {
+      "authorization": "Bearer seeded-expired-token-0001"
+    }
+  },
+  "expected": {
+    "status": 401,
+    "body": {
+      "error": "invalid_token",
+      "error_description": "Invalid or expired access token"
+    }
+  }
+}

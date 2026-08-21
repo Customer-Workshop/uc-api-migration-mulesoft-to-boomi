@@ -1,0 +1,55 @@
+#%RAML 1.0
+title: Employee Services API
+version: v1
+baseUri: /api
+
+/employee/{employeeId}:
+  uriParameters:
+    employeeId:
+      type: string
+      description: The unique identifier for the employee
+  /goals:
+    get:
+      description: Retrieve goals for a specific employee
+      responses:
+        200:
+          body:
+            application/json:
+              example: |
+                ["Build an Agentforce Agent using the new MCP protocol for integrations."]
+        404:
+          body:
+            application/json:
+              example: |
+                {"message": "No goals found for employee 74"}
+  /learning-status:
+    get:
+      description: Get learning course status for a specific employee
+      responses:
+        200:
+          body:
+            application/json:
+  /next-pay-date:
+    get:
+      description: Get next pay date for a specific employee
+      responses:
+        200:
+          body:
+            application/json:
+  /pto:
+    /balance:
+      get:
+        description: Get PTO balance for a specific employee
+        responses:
+          200:
+            body:
+              application/json:
+    /schedule:
+      post:
+        description: Schedule PTO time for a specific employee
+        body:
+          application/json:
+        responses:
+          200:
+            body:
+              application/json:

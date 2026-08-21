@@ -1,0 +1,19 @@
+{
+  "case": "health",
+  "description": "GET /health \u2014 DB connectivity check",
+  "request": {
+    "method": "GET",
+    "path": "/health"
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "status": "healthy",
+      "database": "connected",
+      "timestamp": "__MASKED__"
+    }
+  },
+  "mask": [
+    "$.timestamp"
+  ]
+}

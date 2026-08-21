@@ -1,0 +1,38 @@
+{
+  "case": "pto-schedule",
+  "description": "SOURCE QUIRK: POST pto/schedule upserts endDate into employee_pto.next_pay_date \u2014 there is no pto_schedule table",
+  "request": {
+    "method": "POST",
+    "path": "/api/employee/74/pto/schedule",
+    "headers": {
+      "authorization": "Bearer seeded-valid-token-0001",
+      "content-type": "application/json"
+    },
+    "body": {
+      "startDate": "2026-10-01",
+      "endDate": "2026-10-05"
+    }
+  },
+  "expected": {
+    "status": 200,
+    "body": {
+      "employeeId": "74",
+      "startDate": "2026-10-01",
+      "endDate": "2026-10-05",
+      "status": "success",
+      "message": "PTO scheduled successfully"
+    }
+  },
+  "probes": [
+    {
+      "kind": "rows",
+      "description": "upsert side effect: next_pay_date overwritten with endDate",
+      "sql": "SELECT next_pay_date::text FROM employee_pto WHERE employee_id = '74'",
+      "expect": [
+        [
+          "2026-10-05"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "case": "auth-missing-token",
+  "description": "protected endpoint without Authorization header",
+  "request": {
+    "method": "GET",
+    "path": "/api/employee/101/goals"
+  },
+  "expected": {
+    "status": 401,
+    "body": {
+      "error": "missing_token",
+      "error_description": "Authorization header is missing or invalid"
+    }
+  }
+}
