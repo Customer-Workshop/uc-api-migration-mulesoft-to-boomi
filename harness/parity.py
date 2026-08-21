@@ -178,7 +178,13 @@ def run_probes(conn: psycopg.Connection, probes: list[dict], response_body) -> l
                 failures.append(f"probe '{p['description']}': got {rows}, expected {p['expect']}")
         elif p["kind"] == "response_db_match":
             db_val = rows[0][0] if rows and rows[0] else None
-            resp_val = json_path_get(response_body, p["response_path"])
+            try:
+                resp_val = json_path_get(response_body, p["response_path"])
+            except (KeyError, TypeError):
+                failures.append(
+                    f"probe '{p['description']}': response has no {p['response_path']} (body: {json.dumps(response_body)})"
+                )
+                continue
             if db_val != resp_val or db_val in (None, ""):
                 failures.append(
                     f"probe '{p['description']}': DB value {db_val!r} != response {p['response_path']} {resp_val!r}"

@@ -27,21 +27,44 @@ def local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+APIKIT_NAME = re.compile(r"^(get|post|put|delete):((?:\\[^:]+)+)")
+
+
 def flow_path(flow: ET.Element) -> tuple[str, str]:
     listener = next((x for x in flow.iter() if local(x.tag) == "listener"), None)
-    if listener is None:
-        return "unknown", ""
-    method = listener.attrib.get("allowedMethods", "GET").split(",")[0].strip().upper()
-    return method, listener.attrib.get("path", "")
+    if listener is not None:
+        method = listener.attrib.get("allowedMethods", "GET").split(",")[0].strip().upper()
+        return method, listener.attrib.get("path", "")
+    # APIKit-routed flows carry their route in the flow name, e.g.
+    # get:\employee\(employeeId)\goals:employee-services-api-config
+    match = APIKIT_NAME.match(flow.attrib.get("name", ""))
+    if match:
+        path = match.group(2).replace("\\", "/").replace("(", "{").replace(")", "}")
+        return match.group(1).upper(), f"/api{path}"
+    return "", ""
 
 
-def classify(method: str, path: str, name: str) -> str:
+def classify(method: str, path: str, name: str) -> tuple[str, str]:
     if (method, path) in DEMO_ROUTES:
-        return "maps cleanly"
-    lower = f"{name} {path}".lower()
-    flags = ("object-store", "objectstore", "salesforce", "web", "cors", "register",
-             "login", "refresh", "disconnect", "/api/*", "/auth/*")
-    return "flag for redesign" if any(flag in lower for flag in flags) else "flag for redesign"
+        return "maps cleanly", "direct Boomi process mapping (in-scope wave 1 route)"
+    lower = name.lower()
+    if "validate-token" in lower:
+        return "maps cleanly", "shared 'Common - Validate Token' subprocess"
+    if "main" in lower or "console" in lower:
+        return "absorbed", "APIKit router/console absorbed by Boomi Web Services Server configuration"
+    reasons = [
+        ("salesforce", "Salesforce callback integration needs redesign against Boomi's Salesforce connector"),
+        ("refresh", "refresh-token lifecycle differs from Boomi API Management token handling"),
+        ("regist", "user registration/password flow is out of migration scope"),
+        ("login", "interactive login flow is out of migration scope"),
+        ("disconnect", "connected-app teardown flow needs a design decision"),
+        ("cors", "CORS preflight is edge configuration in Boomi, not a process"),
+        ("web", "static web content does not map to a Boomi process"),
+    ]
+    for marker, reason in reasons:
+        if marker in lower:
+            return "flag for redesign", reason
+    return "flag for redesign", "no clean Boomi construct mapping identified"
 
 
 def main() -> int:
@@ -52,6 +75,7 @@ def main() -> int:
             continue
         name = flow.attrib.get("name", "")
         method, path = flow_path(flow)
+        mapping, reason = classify(method, path, name)
         connectors = set()
         sql = []
         transforms = 0
@@ -80,7 +104,7 @@ def main() -> int:
                 transforms += 1
             if tag.startswith("on-error"):
                 handlers += 1
-        complexity = "S" if shapes + transforms + handlers <= 8 else "M" if shapes + transforms + handlers <= 20 else "L"
+        complexity = "S" if shapes + transforms + handlers <= 15 else "M" if shapes + transforms + handlers <= 40 else "L"
         rows.append({
             "flow": name,
             "trigger": {"method": method, "path": path},
@@ -88,18 +112,19 @@ def main() -> int:
             "sql_statements": sql,
             "dataweave_transform_count": transforms,
             "error_handler_count": handlers,
-            "mapping": classify(method, path, name),
+            "mapping": mapping,
+            "reason": reason,
             "complexity": complexity,
         })
     REPORT.mkdir(parents=True, exist_ok=True)
     (REPORT / "estate.json").write_text(json.dumps(rows, indent=2) + "\n")
-    lines = ["# MuleSoft estate inventory", "", "| Flow | Trigger | Connectors | SQL | DataWeave | Errors | Mapping | Complexity |",
-             "|---|---|---|---:|---:|---:|---|---|"]
+    lines = ["# MuleSoft estate inventory", "", "| Flow | Trigger | Connectors | SQL | DataWeave | Errors | Mapping | Complexity | Why |",
+             "|---|---|---|---:|---:|---:|---|---|---|"]
     for row in rows:
-        trigger = f"{row['trigger']['method']} {row['trigger']['path']}"
-        lines.append(f"| {row['flow']} | `{trigger}` | {', '.join(row['connectors']) or '—'} | "
+        trigger = f"{row['trigger']['method']} {row['trigger']['path']}".strip()
+        lines.append(f"| {row['flow']} | `{trigger or 'n/a'}` | {', '.join(row['connectors']) or '—'} | "
                      f"{len(row['sql_statements'])} | {row['dataweave_transform_count']} | "
-                     f"{row['error_handler_count']} | {row['mapping']} | {row['complexity']} |")
+                     f"{row['error_handler_count']} | {row['mapping']} | {row['complexity']} | {row['reason']} |")
     (REPORT / "estate.md").write_text("\n".join(lines) + "\n")
     print(f"Inventory written to {REPORT} ({len(rows)} flows)")
     return 0

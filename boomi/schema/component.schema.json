@@ -92,6 +92,7 @@
         },
         "template": { "description": "message shape: JSON template; {{pathParam:x}} / {{property:x}} placeholders are substituted" },
         "status": { "type": "integer", "minimum": 200, "maximum": 599 },
+        "halt": { "type": "boolean", "description": "returndocuments in a subprocess: true short-circuits the parent with this response" },
         "properties": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/source" }
