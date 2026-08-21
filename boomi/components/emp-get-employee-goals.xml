@@ -1,0 +1,30 @@
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="EMP - Get Employee Goals">
+  <bns:object>
+    <process>
+      <route method="GET" path="/api/employee/{employeeId}/goals"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="auth"/>
+        <shape name="auth" shapetype="processcall" process="Common - Validate Token" next="q"/>
+        <shape name="q" shapetype="connectoraction" connector="database" operation="select" next="found">
+          <sql>SELECT goal FROM employee_goals WHERE employee_id = :employeeId</sql>
+          <parameter name="employeeId" kind="pathParam" ref="employeeId"/>
+        </shape>
+        <shape name="found" shapetype="decision" whenTrue="mk_array" whenFalse="mk_msg">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="mk_array" shapetype="map" next="done">
+          <mapping to="$" kind="payload">
+            <foreach field="goal"/>
+          </mapping>
+        </shape>
+        <shape name="mk_msg" shapetype="message" next="done">
+          <template>{"message": "No goals found for employee {{pathParam:employeeId}}"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>
