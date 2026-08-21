@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="EMP - OAuth Token">
+  <bns:object>
+    <process>
+      <route method="POST" path="/oauth/token"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="auth_method"/>
+        <shape name="auth_method" shapetype="decision" whenTrue="basic_creds" whenFalse="body_creds">
+          <condition operator="exists">
+            <left kind="header" name="authorization"/>
+          </condition>
+        </shape>
+        <shape name="basic_creds" shapetype="properties" next="validate">
+          <property name="clientId" kind="header" ref="authorization" path="basic:username"/>
+          <property name="clientSecret" kind="header" ref="authorization" path="basic:password"/>
+        </shape>
+        <shape name="body_creds" shapetype="properties" next="validate">
+          <property name="clientId" kind="body" path="$.client_id"/>
+          <property name="clientSecret" kind="body" path="$.client_secret"/>
+        </shape>
+        <shape name="validate" shapetype="connectoraction" connector="database" operation="select" next="valid">
+          <sql>SELECT client_id, client_secret, user_id FROM api_clients WHERE client_id = :clientId AND client_secret = :clientSecret</sql>
+          <parameter name="clientId" kind="property" ref="clientId"/>
+          <parameter name="clientSecret" kind="property" ref="clientSecret"/>
+        </shape>
+        <shape name="valid" shapetype="decision" whenTrue="gen_token" whenFalse="invalid_msg">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="gen_token" shapetype="properties" next="store">
+          <property name="accessToken" kind="function" function="uuid"/>
+          <property name="expiresAt" kind="function" function="now_plus_seconds" args="[3600]"/>
+        </shape>
+        <shape name="store" shapetype="connectoraction" connector="database" operation="execute" next="token_msg">
+          <sql>INSERT INTO api_clients (client_id, client_secret, access_token, expires_at) VALUES (:clientId, :clientSecret, :accessToken, :expiresAt) ON CONFLICT (client_id) DO UPDATE SET access_token = :accessToken, expires_at = :expiresAt</sql>
+          <parameter name="clientId" kind="property" ref="clientId"/>
+          <parameter name="clientSecret" kind="property" ref="clientSecret"/>
+          <parameter name="accessToken" kind="property" ref="accessToken"/>
+          <parameter name="expiresAt" kind="property" ref="expiresAt"/>
+        </shape>
+        <shape name="token_msg" shapetype="message" status="200" next="done">
+          <template>{"access_token": "{{property:accessToken}}", "token_type": "Bearer", "expires_in": 3600, "scope": "read write"}</template>
+        </shape>
+        <shape name="invalid_msg" shapetype="message" status="401" next="deny">
+          <template>{"error": "invalid_client", "error_description": "Client authentication failed"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+        <shape name="deny" shapetype="returndocuments" status="401"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>
