@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="EMP - Get Learning Status">
+  <bns:object>
+    <process>
+      <route method="GET" path="/api/employee/{employeeId}/learning-status"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="auth"/>
+        <shape name="auth" shapetype="processcall" process="Common - Validate Token" next="q"/>
+        <shape name="q" shapetype="connectoraction" connector="database" operation="select" next="found">
+          <sql>SELECT course, status FROM employee_learning WHERE employee_id = :employeeId</sql>
+          <parameter name="employeeId" kind="pathParam" ref="employeeId"/>
+        </shape>
+        <shape name="found" shapetype="decision" whenTrue="mk_obj" whenFalse="mk_404">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="mk_obj" shapetype="map" next="done">
+          <mapping to="employeeId" kind="pathParam" name="employeeId"/>
+          <mapping to="learningStatus" kind="payload">
+            <foreach fields="course,status"/>
+          </mapping>
+          <mapping to="status" kind="literal" value="success"/>
+        </shape>
+        <shape name="mk_404" shapetype="message" status="404" next="deny">
+          <template>{"error": "Learning records not found", "employeeId": "{{pathParam:employeeId}}"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+        <shape name="deny" shapetype="returndocuments" status="404"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>

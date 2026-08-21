@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="EMP - Health Check">
+  <bns:object>
+    <process>
+      <route method="GET" path="/health"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="dbcheck"/>
+        <shape name="dbcheck" shapetype="connectoraction" connector="database" operation="select" next="ts">
+          <sql>SELECT 1 as health_check</sql>
+        </shape>
+        <shape name="ts" shapetype="properties" next="msg">
+          <property name="ts" kind="function" function="now_iso"/>
+        </shape>
+        <shape name="msg" shapetype="message" next="done">
+          <template>{"status": "healthy", "database": "connected", "timestamp": "{{property:ts}}"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>

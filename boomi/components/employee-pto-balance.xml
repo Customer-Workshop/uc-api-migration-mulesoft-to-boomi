@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process"
+               name="EMP - Get PTO Balance">
+  <bns:object>
+    <process>
+      <route method="GET" path="/api/employee/{employeeId}/pto/balance"/>
+      <shapes>
+        <shape name="start" shapetype="start" next="auth"/>
+        <shape name="auth" shapetype="processcall" process="Common - Validate Token" next="q"/>
+        <shape name="q" shapetype="connectoraction" connector="database" operation="select" next="found">
+          <sql>SELECT pto_balance FROM employee_pto WHERE employee_id = :employeeId</sql>
+          <parameter name="employeeId" kind="pathParam" ref="employeeId"/>
+        </shape>
+        <shape name="found" shapetype="decision" whenTrue="mk_obj" whenFalse="mk_404">
+          <condition operator="notempty">
+            <left kind="payload"/>
+          </condition>
+        </shape>
+        <shape name="mk_obj" shapetype="map" next="done">
+          <mapping to="employeeId" kind="pathParam" name="employeeId"/>
+          <mapping to="ptoBalance" kind="payload" path="$[0].pto_balance"/>
+          <mapping to="status" kind="literal" value="success"/>
+        </shape>
+        <shape name="mk_404" shapetype="message" status="404" next="deny">
+          <template>{"error": "Employee PTO record not found", "employeeId": "{{pathParam:employeeId}}"}</template>
+        </shape>
+        <shape name="done" shapetype="returndocuments" status="200"/>
+        <shape name="deny" shapetype="returndocuments" status="404"/>
+      </shapes>
+    </process>
+  </bns:object>
+</bns:Component>
